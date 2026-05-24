@@ -524,38 +524,33 @@ impl App {
 
     pub(super) fn handle_event(&mut self, ev: AppEvent) {
         match ev {
-            AppEvent::DatasetsFetched(Ok(datasets)) => {
-                let count = datasets.len();
+            AppEvent::DatasetsFetched(result) => {
                 self.busy = false;
-                self.status = format!("loaded {count} dataset(s)");
-            }
-            AppEvent::DatasetsFetched(Err(e)) => {
-                self.busy = false;
-                self.set_error(format!("datasets error: {e}"));
-            }
-            AppEvent::DashboardsFetched(Ok(items)) => {
-                self.busy = false;
-                let n = items.len();
-                self.dashboards.open(items);
-                self.status = format!("{n} dashboard(s)");
-            }
-            AppEvent::DashboardsFetched(Err(e)) => {
-                self.busy = false;
-                self.set_error(format!("dashboards error: {e}"));
-            }
-            AppEvent::DashboardsRefreshed(Ok(items)) => {
-                let n = items.len();
-                // Quietly update the picker if it's still showing the
-                // cached list; otherwise the cache write (already done
-                // in the spawn closure) is enough for next time.
-                if self.dashboards.visible {
-                    self.dashboards.refresh_items(items);
-                    self.status = format!("{n} dashboard(s) (refreshed)");
+                match result {
+                    Ok(d) => self.status = format!("loaded {} dataset(s)", d.len()),
+                    Err(e) => self.set_error(format!("datasets error: {e}")),
                 }
             }
+            AppEvent::DashboardsFetched(result) => {
+                self.busy = false;
+                match result {
+                    Ok(items) => {
+                        let n = items.len();
+                        self.dashboards.open(items);
+                        self.status = format!("{n} dashboard(s)");
+                    }
+                    Err(e) => self.set_error(format!("dashboards error: {e}")),
+                }
+            }
+            // Background refresh — update the picker if still visible;
+            // surface failures softly without clobbering current state.
+            AppEvent::DashboardsRefreshed(Ok(items)) if self.dashboards.visible => {
+                let n = items.len();
+                self.dashboards.refresh_items(items);
+                self.status = format!("{n} dashboard(s) (refreshed)");
+            }
+            AppEvent::DashboardsRefreshed(Ok(_)) => {}
             AppEvent::DashboardsRefreshed(Err(e)) => {
-                // Background failure — keep the cached list visible and
-                // log a soft status message.
                 self.status = format!("dashboards refresh failed: {e}");
             }
             AppEvent::DashboardOpened { uid, result } => {
@@ -697,63 +692,37 @@ impl App {
                     }
                 }
             }
-            AppEvent::MetricsFetched {
-                dataset,
-                result: Ok(metrics),
-            } => {
+            AppEvent::MetricsFetched { dataset, result } => {
                 self.busy = false;
-                let count = metrics.len();
-                self.status = format!("loaded {count} metric(s) for `{dataset}`");
-            }
-            AppEvent::MetricsFetched {
-                dataset,
-                result: Err(e),
-            } => {
-                self.busy = false;
-                self.set_error(format!("metrics error for `{dataset}`: {e}"));
-            }
-            AppEvent::TagsFetched {
-                dataset,
-                metric,
-                result: Ok(tags),
-            } => {
-                // Background prefetch — only update status if no foreground op
-                // is in flight, otherwise we'd clobber e.g. "running query…".
-                if !self.busy {
-                    let count = tags.len();
-                    self.status = format!("loaded {count} tag(s) for `{dataset}:{metric}`");
+                match result {
+                    Ok(metrics) => {
+                        self.status =
+                            format!("loaded {} metric(s) for `{dataset}`", metrics.len())
+                    }
+                    Err(e) => self.set_error(format!("metrics error for `{dataset}`: {e}")),
                 }
             }
-            AppEvent::TagsFetched {
-                dataset,
-                metric,
-                result: Err(e),
-            } => {
-                if !self.busy {
-                    self.status = format!("tags error for `{dataset}:{metric}`: {e}");
-                }
+            // Background prefetches — don't clobber foreground status while
+            // a query is in flight.
+            AppEvent::TagsFetched { dataset, metric, result } if !self.busy => {
+                self.status = match result {
+                    Ok(tags) => {
+                        format!("loaded {} tag(s) for `{dataset}:{metric}`", tags.len())
+                    }
+                    Err(e) => format!("tags error for `{dataset}:{metric}`: {e}"),
+                };
             }
-            AppEvent::TagValuesFetched {
-                dataset,
-                metric,
-                tag,
-                result: Ok(values),
-            } => {
-                if !self.busy {
-                    let count = values.len();
-                    self.status = format!("loaded {count} value(s) for `{dataset}:{metric}.{tag}`");
-                }
+            AppEvent::TagsFetched { .. } => {}
+            AppEvent::TagValuesFetched { dataset, metric, tag, result } if !self.busy => {
+                self.status = match result {
+                    Ok(values) => format!(
+                        "loaded {} value(s) for `{dataset}:{metric}.{tag}`",
+                        values.len()
+                    ),
+                    Err(e) => format!("values error for `{dataset}:{metric}.{tag}`: {e}"),
+                };
             }
-            AppEvent::TagValuesFetched {
-                dataset,
-                metric,
-                tag,
-                result: Err(e),
-            } => {
-                if !self.busy {
-                    self.status = format!("values error for `{dataset}:{metric}.{tag}`: {e}");
-                }
-            }
+            AppEvent::TagValuesFetched { .. } => {}
             AppEvent::QueryFinished { id, result } => {
                 if id != self.last_query_id {
                     // Stale response from a superseded query; ignore.

@@ -8,6 +8,32 @@ use crate::dashboard::VizKind;
 
 use super::*;
 
+/// Parse `args[1]` / `args[2]` as `u32`. Used by `:tile mv` and `:tile size`.
+/// `nonzero=true` rejects zero values (size needs ≥1). Returns the
+/// already-formatted error string so callers can pass it straight to
+/// `set_error`.
+fn parse_two_u32(
+    args: &[&str],
+    sub: &str,
+    a: &str,
+    b: &str,
+    nonzero: bool,
+) -> Result<(u32, u32), String> {
+    let (Some(av), Some(bv)) = (args.get(1), args.get(2)) else {
+        return Err(format!(":tile {sub} <{a}> <{b}>: two integer args required"));
+    };
+    let kind_hint = if nonzero { "positive" } else { "non-negative" };
+    let (Ok(x), Ok(y)) = (av.parse::<u32>(), bv.parse::<u32>()) else {
+        return Err(format!(
+            ":tile {sub}: {a} and {b} must be {kind_hint} integers"
+        ));
+    };
+    if nonzero && (x == 0 || y == 0) {
+        return Err(format!(":tile {sub}: {a} and {b} must be ≥1"));
+    }
+    Ok((x, y))
+}
+
 impl App {
 
     /// Dispatch a stripped command string to the matching action. Empty input
@@ -338,166 +364,132 @@ impl App {
             return;
         }
         match sub {
-            "json" | "inspect" => {
-                if let Some(json) = self.focused_chart_json() {
-                    self.tile_inspect_json = Some(json);
-                } else {
-                    self.status = ":tile json: no tile selected".to_string();
+            "json" | "inspect" => match self.focused_chart_json() {
+                Some(json) => self.tile_inspect_json = Some(json),
+                None => self.status = ":tile json: no tile selected".to_string(),
+            },
+            "add" => self.tile_add(&args[1..]),
+            "rm" => self.tile_op("rm", |app, id| {
+                let n_before;
+                let r = {
+                    let resource = app.loaded_dashboard.as_mut().unwrap();
+                    let r = tile_ops::delete(
+                        &mut resource.dashboard.charts,
+                        &mut resource.dashboard.layout,
+                        id,
+                    );
+                    n_before = resource.dashboard.charts.len();
+                    r
+                };
+                if r.is_ok() && app.selected_chart_idx >= n_before {
+                    app.selected_chart_idx = n_before.saturating_sub(1);
                 }
-            }
-            "add" => {
-                let Some(kind_str) = args.get(1) else {
-                    self.set_error(":tile add <kind>: kind required".to_string());
-                    return;
-                };
-                let Some(kind) = crate::dashboard::VizKind::parse(kind_str) else {
-                    self.set_error(format!(":tile add {kind_str}: unknown viz kind"));
-                    return;
-                };
-                let name = args[2..].join(" ");
-                let name = if name.is_empty() {
-                    "new tile".to_string()
-                } else {
-                    name
-                };
-                let resource = self.loaded_dashboard.as_mut().unwrap();
-                let id = tile_ops::insert_tile(
-                    &mut resource.dashboard.charts,
-                    &mut resource.dashboard.layout,
-                    kind,
-                    &name,
-                );
-                self.dashboard_dirty = true;
-                self.selected_chart_idx = resource.dashboard.charts.len() - 1;
-                self.status = format!("added {} tile {id}", kind.as_str());
-            }
-            "rm" => {
-                let Some(id) = self.current_chart_id() else {
-                    self.set_error(":tile rm: no tile selected".to_string());
-                    return;
-                };
-                let resource = self.loaded_dashboard.as_mut().unwrap();
-                match tile_ops::delete(
-                    &mut resource.dashboard.charts,
-                    &mut resource.dashboard.layout,
-                    &id,
-                ) {
-                    Ok(()) => {
-                        self.dashboard_dirty = true;
-                        let n = resource.dashboard.charts.len();
-                        if self.selected_chart_idx >= n {
-                            self.selected_chart_idx = n.saturating_sub(1);
-                        }
-                        self.status = format!("deleted tile {id}");
-                    }
-                    Err(e) => self.set_error(format!(":tile rm: {e}")),
-                }
-            }
-            "mv" => {
-                let (Some(x_s), Some(y_s)) = (args.get(1), args.get(2)) else {
-                    self.set_error(":tile mv <x> <y>: two integer args required".to_string());
-                    return;
-                };
-                let (Ok(x), Ok(y)) = (x_s.parse::<u32>(), y_s.parse::<u32>()) else {
-                    self.set_error(":tile mv: x and y must be non-negative integers".to_string());
-                    return;
-                };
-                let Some(id) = self.current_chart_id() else {
-                    self.set_error(":tile mv: no tile selected".to_string());
-                    return;
-                };
-                // Compute delta from current position so the shared
-                // collision-checking helper does the rest.
-                let resource = self.loaded_dashboard.as_mut().unwrap();
-                let cur = resource
-                    .dashboard
-                    .layout
-                    .iter()
-                    .find(|l| l.i == id)
-                    .cloned();
-                let (cx, cy) = cur
-                    .as_ref()
-                    .map(|l| (l.x as i32, l.y.unwrap_or(0) as i32))
-                    .unwrap_or((0, 0));
-                match tile_ops::translate(
-                    &mut resource.dashboard.layout,
-                    &id,
-                    x as i32 - cx,
-                    y as i32 - cy,
-                ) {
-                    Ok(()) => {
-                        self.dashboard_dirty = true;
-                        self.status = format!(":tile mv {x} {y} ok");
-                    }
-                    Err(e) => self.set_error(format!(":tile mv: {e}")),
-                }
-            }
-            "size" => {
-                let (Some(w_s), Some(h_s)) = (args.get(1), args.get(2)) else {
-                    self.set_error(":tile size <w> <h>: two integer args required".to_string());
-                    return;
-                };
-                let (Ok(w), Ok(h)) = (w_s.parse::<u32>(), h_s.parse::<u32>()) else {
-                    self.set_error(":tile size: w and h must be positive integers".to_string());
-                    return;
-                };
-                if w == 0 || h == 0 {
-                    self.set_error(":tile size: w and h must be ≥1".to_string());
-                    return;
-                }
-                let Some(id) = self.current_chart_id() else {
-                    self.set_error(":tile size: no tile selected".to_string());
-                    return;
-                };
-                let resource = self.loaded_dashboard.as_mut().unwrap();
-                let cur = resource
-                    .dashboard
-                    .layout
-                    .iter()
-                    .find(|l| l.i == id)
-                    .cloned();
-                let (cw, ch) = cur
-                    .as_ref()
-                    .map(|l| (l.w as i32, l.h as i32))
-                    .unwrap_or((6, 6));
-                match tile_ops::resize(
-                    &mut resource.dashboard.layout,
-                    &id,
-                    w as i32 - cw,
-                    h as i32 - ch,
-                ) {
-                    Ok(()) => {
-                        self.dashboard_dirty = true;
-                        self.status = format!(":tile size {w} {h} ok");
-                    }
-                    Err(e) => self.set_error(format!(":tile size: {e}")),
-                }
-            }
+                r.map(|()| format!("deleted tile {id}"))
+            }),
+            "mv" => match parse_two_u32(args, "mv", "x", "y", false) {
+                Ok((x, y)) => self.tile_op("mv", |app, id| {
+                    let resource = app.loaded_dashboard.as_mut().unwrap();
+                    let (cx, cy) = resource
+                        .dashboard
+                        .layout
+                        .iter()
+                        .find(|l| l.i == *id)
+                        .map(|l| (l.x as i32, l.y.unwrap_or(0) as i32))
+                        .unwrap_or((0, 0));
+                    tile_ops::translate(
+                        &mut resource.dashboard.layout,
+                        id,
+                        x as i32 - cx,
+                        y as i32 - cy,
+                    )
+                    .map(|()| format!(":tile mv {x} {y} ok"))
+                }),
+                Err(msg) => self.set_error(msg),
+            },
+            "size" => match parse_two_u32(args, "size", "w", "h", true) {
+                Ok((w, h)) => self.tile_op("size", |app, id| {
+                    let resource = app.loaded_dashboard.as_mut().unwrap();
+                    let (cw, ch) = resource
+                        .dashboard
+                        .layout
+                        .iter()
+                        .find(|l| l.i == *id)
+                        .map(|l| (l.w as i32, l.h as i32))
+                        .unwrap_or((6, 6));
+                    tile_ops::resize(
+                        &mut resource.dashboard.layout,
+                        id,
+                        w as i32 - cw,
+                        h as i32 - ch,
+                    )
+                    .map(|()| format!(":tile size {w} {h} ok"))
+                }),
+                Err(msg) => self.set_error(msg),
+            },
             "title" => {
                 let title = args[1..].join(" ");
                 if title.is_empty() {
                     self.set_error(":tile title <text>: text required".to_string());
                     return;
                 }
-                let Some(id) = self.current_chart_id() else {
-                    self.set_error(":tile title: no tile selected".to_string());
-                    return;
-                };
-                let resource = self.loaded_dashboard.as_mut().unwrap();
-                match tile_ops::set_title(&mut resource.dashboard.charts, &id, &title) {
-                    Ok(()) => {
-                        self.dashboard_dirty = true;
-                        self.status = format!(":tile title `{title}`");
-                    }
-                    Err(e) => self.set_error(format!(":tile title: {e}")),
-                }
+                self.tile_op("title", |app, id| {
+                    let resource = app.loaded_dashboard.as_mut().unwrap();
+                    tile_ops::set_title(&mut resource.dashboard.charts, id, &title)
+                        .map(|()| format!(":tile title `{title}`"))
+                });
             }
-            other => {
-                self.set_error(format!(
-                    ":tile {other}: unknown sub-command (add, rm, mv, size, title)"
-                ));
-            }
+            other => self.set_error(format!(
+                ":tile {other}: unknown sub-command (add, rm, mv, size, title)"
+            )),
         }
+    }
+
+    /// Shared subcommand body for `:tile rm/mv/size/title`. Resolves
+    /// the focused chart id, runs `op` (which mutates the dashboard
+    /// and returns the success message), and flips the dirty/status
+    /// flags. Errors surface as `:tile <sub>: <msg>`.
+    fn tile_op<F>(&mut self, sub: &str, op: F)
+    where
+        F: FnOnce(&mut App, &str) -> Result<String, &'static str>,
+    {
+        let Some(id) = self.current_chart_id() else {
+            self.set_error(format!(":tile {sub}: no tile selected"));
+            return;
+        };
+        match op(self, &id) {
+            Ok(msg) => {
+                self.dashboard_dirty = true;
+                self.status = msg;
+            }
+            Err(e) => self.set_error(format!(":tile {sub}: {e}")),
+        }
+    }
+
+    /// `:tile add <kind> [name]` body. Kept separate from `tile_op`
+    /// because it adds a chart instead of mutating an existing one
+    /// and updates `selected_chart_idx` so the newly-added tile is
+    /// focused.
+    fn tile_add(&mut self, args: &[&str]) {
+        let Some(kind_str) = args.first() else {
+            self.set_error(":tile add <kind>: kind required".to_string());
+            return;
+        };
+        let Some(kind) = crate::dashboard::VizKind::parse(kind_str) else {
+            self.set_error(format!(":tile add {kind_str}: unknown viz kind"));
+            return;
+        };
+        let name = args[1..].join(" ");
+        let name = if name.is_empty() { "new tile".to_string() } else { name };
+        let resource = self.loaded_dashboard.as_mut().unwrap();
+        let id = tile_ops::insert_tile(
+            &mut resource.dashboard.charts,
+            &mut resource.dashboard.layout,
+            kind,
+            &name,
+        );
+        self.dashboard_dirty = true;
+        self.selected_chart_idx = resource.dashboard.charts.len() - 1;
+        self.status = format!("added {} tile {id}", kind.as_str());
     }
 
     /// `:grid` — enter multi-tile grid view. Only meaningful when a
