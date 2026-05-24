@@ -7,7 +7,7 @@ use tokio::runtime::Handle;
 use tui_textarea::{CursorMove, TextArea};
 
 use crate::axiom::{
-    self, Client as AxiomClient, DashboardSummary, DatasetSummary, MetricInfo,
+    Client as AxiomClient, DashboardSummary, DatasetSummary, MetricInfo,
     MetricsQueryResponse, MetricsSeries,
 };
 use crate::cache::{Cache, EdgeRoute};
@@ -1123,7 +1123,7 @@ impl App {
                 .get(self.selected_chart_idx)
             && let crate::dashboard::Query::Mpl(mpl) =
                 crate::dashboard::extract_query(chart)
-            && let Ok((ds, m)) = crate::axiom::extract_dataset_metric(&mpl)
+            && let Ok((ds, m)) = crate::mpl::extract_dataset_metric(&mpl)
         {
             // Tile context: ignore the editor's query-hash store
             // (the tile's hash isn't the editor's) and key purely
@@ -1210,7 +1210,7 @@ impl App {
             self.status = format!("tile {id}: no MPL query to rerun");
             return;
         };
-        let dataset = match axiom::extract_dataset_metric(&mpl) {
+        let dataset = match mpl::extract_dataset_metric(&mpl) {
             Ok((d, _)) => d,
             Err(e) => {
                 self.tile_results.insert(
@@ -1769,7 +1769,7 @@ impl App {
                 .get(self.selected_chart_idx)
             && let crate::dashboard::Query::Mpl(mpl) =
                 crate::dashboard::extract_query(chart)
-            && let Ok((ds, m)) = crate::axiom::extract_dataset_metric(&mpl)
+            && let Ok((ds, m)) = crate::mpl::extract_dataset_metric(&mpl)
         {
             let mut cache = self.cache.write().unwrap();
             cache.set_legend_tags_for_metric(&ds, &m, self.legend_label_tags.clone());
@@ -2354,7 +2354,7 @@ impl App {
 
     fn fetch_metrics_for_current_query(&mut self) {
         let mpl = self.query_text();
-        let dataset = match axiom::extract_dataset_metric(&mpl).map(|p| p.0) {
+        let dataset = match mpl::extract_dataset_metric(&mpl).map(|p| p.0) {
             Ok(d) => d,
             Err(e) => {
                 self.status = format!("MPL error: {e}");
@@ -2488,7 +2488,7 @@ impl App {
     /// `filter` clause — and fire a background values fetch for each. Skips
     /// pairs that are already cached. Best-effort; failures stay in status.
     fn prefetch_tag_values_from_query(&mut self, mpl: &str) {
-        let (dataset, metric) = match axiom::extract_dataset_metric(mpl) {
+        let (dataset, metric) = match mpl::extract_dataset_metric(mpl) {
             Ok(d) => d,
             Err(_) => return,
         };
@@ -2567,7 +2567,7 @@ impl App {
         // The MetricsDB server resolves `$__interval` and friends from the
         // request's time window, so we send the buffer verbatim.
         let mpl = self.query_text();
-        let (dataset, metric) = match axiom::extract_dataset_metric(&mpl) {
+        let (dataset, metric) = match mpl::extract_dataset_metric(&mpl) {
             Ok(dm) => dm,
             Err(e) => {
                 self.status = format!("MPL error: {e}");
@@ -2983,7 +2983,7 @@ impl App {
         }
         // Dataset is best-effort: the metrics explorer just needs `apl` set,
         // and `metricsDataset` is a hint that selects the right tab.
-        let dataset = axiom::extract_dataset_metric(&mpl).map(|p| p.0).ok();
+        let dataset = mpl::extract_dataset_metric(&mpl).map(|p| p.0).ok();
         let (deployment_url, org_id) = match Config::load() {
             Ok(cfg) => match cfg.active() {
                 Ok((_, dep)) => (dep.url.clone(), dep.org_id.clone()),
@@ -3417,7 +3417,7 @@ impl App {
                     trace_id: None,
                 },
             );
-            let dataset = match axiom::extract_dataset_metric(&mpl) {
+            let dataset = match mpl::extract_dataset_metric(&mpl) {
                 Ok((d, _)) => d,
                 Err(e) => {
                     self.tile_results.insert(
@@ -3783,7 +3783,7 @@ impl App {
                 // We don't know the AST hash without running the
                 // pipeline; pass empty so `resolve_legend_tags`
                 // falls through to the by-metric store.
-                if let Ok((ds, m)) = crate::axiom::extract_dataset_metric(mpl) {
+                if let Ok((ds, m)) = crate::mpl::extract_dataset_metric(mpl) {
                     self.last_query_context = Some(QueryContext {
                         hash: String::new(),
                         dataset: ds,

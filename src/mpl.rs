@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 
+use anyhow::{Result, anyhow};
 use mpl_lang::visitor::QueryWalker as _;
 use mpl_language_server::{
     DiagnosticItem, Severity as EngineSeverity, SystemParamSpec, compute_diagnostics,
@@ -377,6 +378,88 @@ fn value_matches_type(value: &str, declared: &mpl_lang::query::ParamType) -> boo
 }
 
 /// Compute 1-indexed (line, column) for `byte_offset` into `text`.
+/// Skip leading whitespace plus any number of MPL line comments
+/// (`// …\n`) and block comments (`/* … */`). MPL pragmas like the
+/// dashboard adoption's `// @viz statistic` live in these comments,
+/// and without this step the dataset parser would see `//` as the
+/// dataset name.
+fn skip_leading_comments_and_ws(mut s: &str) -> &str {
+    loop {
+        let trimmed = s.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("//") {
+            // Line comment: skip up to and including the newline.
+            s = match rest.find('\n') {
+                Some(i) => &rest[i + 1..],
+                None => "",
+            };
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("/*") {
+            // Block comment: skip up to and including `*/`.
+            s = match rest.find("*/") {
+                Some(i) => &rest[i + 2..],
+                None => "",
+            };
+            continue;
+        }
+        return trimmed;
+    }
+}
+
+/// Parse `dataset:metric` out of an MPL query. Returns `(dataset, metric)`,
+/// both with backtick quoting stripped. The metric portion is empty if the
+/// query lacks a colon (i.e. only the dataset has been typed so far).
+///
+/// Lives in this module — not `axiom` — because it's pure MPL
+/// source-text parsing; the HTTP client just happens to be its main
+/// consumer.
+pub fn extract_dataset_metric(mpl: &str) -> Result<(String, String)> {
+    let s = skip_leading_comments_and_ws(mpl);
+    // Tolerate a few stray `|` pipes (or whitespace) before the
+    // dataset — callers occasionally hand us a buffer with a leading
+    // continuation line.
+    let s = s.trim_start_matches(|c: char| c == '|' || c.is_whitespace());
+    let s = skip_leading_comments_and_ws(s);
+
+    let (dataset, rest) = if let Some(rest) = s.strip_prefix('`') {
+        let end = rest
+            .find('`')
+            .ok_or_else(|| anyhow!("MPL query has unterminated backtick around dataset"))?;
+        (&rest[..end], &rest[end + 1..])
+    } else {
+        let end = s
+            .find(|c: char| c == ':' || c.is_whitespace())
+            .ok_or_else(|| anyhow!("MPL query missing `dataset:metric` prefix"))?;
+        (&s[..end], &s[end..])
+    };
+
+    if dataset.is_empty() {
+        return Err(anyhow!("MPL query has empty dataset name"));
+    }
+
+    // After the dataset name we expect `:metric`. Tolerate the absence so
+    // callers like the tag prefetcher can keep working on a half-typed query.
+    let rest = rest.trim_start();
+    let metric = if let Some(rest) = rest.strip_prefix(':') {
+        let rest = rest.trim_start();
+        if let Some(rest) = rest.strip_prefix('`') {
+            let end = rest
+                .find('`')
+                .ok_or_else(|| anyhow!("MPL query has unterminated backtick around metric"))?;
+            rest[..end].to_string()
+        } else {
+            let end = rest
+                .find(|c: char| c == '|' || c.is_whitespace())
+                .unwrap_or(rest.len());
+            rest[..end].to_string()
+        }
+    } else {
+        String::new()
+    };
+
+    Ok((dataset.to_string(), metric))
+}
+
 pub fn byte_offset_to_line_col(text: &str, byte_offset: usize) -> (usize, usize) {
     let clamped = byte_offset.min(text.len());
     let prefix = &text[..clamped];

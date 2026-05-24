@@ -114,3 +114,52 @@ fn byte_offset_helper() {
     assert_eq!(byte_offset_to_line_col("a\nbc", 4), (2, 3));
     assert_eq!(byte_offset_to_line_col("ab", 999), (1, 3));
 }
+
+#[test]
+fn extract_dataset_from_backticked() {
+    assert_eq!(
+        extract_dataset_metric("`home`:`temp` | align to 5m using avg")
+            .unwrap()
+            .0,
+        "home"
+    );
+    assert_eq!(
+        extract_dataset_metric("`k8s-metrics-dev`:cpu_usage[1h..]")
+            .unwrap()
+            .0,
+        "k8s-metrics-dev"
+    );
+}
+
+#[test]
+fn extract_dataset_from_plain() {
+    assert_eq!(
+        extract_dataset_metric("home:temp | align to 1m").unwrap().0,
+        "home"
+    );
+}
+
+#[test]
+fn extract_dataset_skips_leading_line_comment() {
+    // The dashboard adoption seeds the editor with a `// @viz`
+    // pragma above the real query. Without comment-skipping the
+    // dataset parser used to read `//` as the dataset name and
+    // ask the server for it, producing
+    // `dataset "//" not found in this deployment`.
+    let q = "// @viz statistic\n`home`:temp\n| group using avg";
+    let (ds, m) = extract_dataset_metric(q).unwrap();
+    assert_eq!(ds, "home");
+    assert_eq!(m, "temp");
+}
+
+#[test]
+fn extract_dataset_skips_multiple_comments() {
+    let q = "// pragma\n// another\n/* block */ `home`:temp";
+    assert_eq!(extract_dataset_metric(q).unwrap().0, "home");
+}
+
+#[test]
+fn extract_dataset_errors_on_garbage() {
+    assert!(extract_dataset_metric("").is_err());
+    assert!(extract_dataset_metric("`unterminated").is_err());
+}

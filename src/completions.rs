@@ -22,8 +22,8 @@ use mpl_language_server::{
     CompletionResult, ParamItem, ParamType, Span, compute_completions_with_params,
 };
 
-use crate::axiom;
 use crate::cache::Cache;
+use crate::mpl;
 use crate::params::{ParamKind, SystemParam};
 
 /// Coarse category for the popup title and downstream branching (cache
@@ -325,7 +325,7 @@ struct TagValueCtx {
 /// for the resolved `(dataset, metric, tag)`.
 fn tag_value_payload(query: &str, cursor: usize, cache: &Cache) -> Option<CompletionPayload> {
     let ctx = detect_tag_value_position(query, cursor)?;
-    let (dataset, metric) = axiom::extract_dataset_metric(query).ok()?;
+    let (dataset, metric) = mpl::extract_dataset_metric(query).ok()?;
     if dataset.is_empty() || metric.is_empty() {
         return None;
     }
