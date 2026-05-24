@@ -63,7 +63,6 @@ const HEAD_COMMANDS: &[&str] = &[
     "q",
     "quit",
     "r",
-    "range",
     "refresh",
     "run",
     "solo",

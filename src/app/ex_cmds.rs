@@ -69,7 +69,7 @@ impl App {
             "dashboards" | "db" => self.cmd_dashboards(),
             "open" => self.cmd_open(args.first().copied()),
             "trace" => self.cmd_trace(),
-            "time" | "range" => self.cmd_time(&args),
+            "time" => self.cmd_time(&args),
             "dashinfo" | "di" => self.cmd_dashinfo(),
             "dash" => self.cmd_dash(&args, bang),
             "grid" => self.cmd_grid(),
@@ -231,7 +231,7 @@ impl App {
         self.fetch_dashboard_by_uid(uid);
     }
 
-    /// `:time` / `:range` — inspect or change the active query window.
+    /// `:time` — inspect or change the active query window.
     ///
     /// Forms:
     ///   * `:time` — open the quick-select preset overlay

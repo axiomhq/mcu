@@ -137,7 +137,7 @@ fn embedded_help_file_has_expected_sections() {
     assert!(KEYS_HELP_SOURCE.contains("## Dashboard pane"));
     assert!(KEYS_HELP_SOURCE.contains("## Time picker"));
     assert!(KEYS_HELP_SOURCE.contains(":trace"));
-    assert!(KEYS_HELP_SOURCE.contains(":time / :range"));
+    assert!(KEYS_HELP_SOURCE.contains(":time"));
 }
 
 #[test]

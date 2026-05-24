@@ -2824,9 +2824,9 @@ fn time_picker_no_args_matches_qr_prefixed_preset() {
 }
 
 #[test]
-fn time_command_alias_range_works() {
+fn time_command_sets_window() {
     let mut app = test_app();
-    app.execute_command("range now-5m now");
+    app.execute_command("time now-5m now");
     assert_eq!(app.active_time_range(), ("now-5m".into(), "now".into()));
 }
 

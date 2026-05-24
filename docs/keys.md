@@ -118,7 +118,7 @@ Esc	close popup / return to Normal
 :viz <kind>	switch viz kind for the focused tile
 :ax / :axiom	open the current query in the Axiom web UI
 :trace	report the trace id of the focused panel
-:time / :range	open the time-range picker (presets + Custom calendar)
+:time	open the time-range picker (presets + Custom calendar)
 :time reset	restore the default time range (now-1h → now)
 :time <start> [end]	set start (and end) directly — relative or RFC3339
 :grid / :solo	switch between dashboard grid and single-panel view
