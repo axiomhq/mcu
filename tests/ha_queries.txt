@@ -1,0 +1,19 @@
+`homeassistant-metrics`:`ha.sensor.temperature` | where entity_id == #/_temperatur$/ and not entity_id == #/^sensor\.wetter/ | align to $__interval using avg | group using avg
+`homeassistant-metrics`:`ha.sensor.humidity` | where entity_id != "sensor.wetter_absolute_luftfeuchte" | align to $__interval using avg | group using avg
+`homeassistant-metrics`:`ha.sensor.carbon_dioxide` | align to $__interval using avg | group using avg
+`homeassistant-metrics`:`ha.sensor.pm25` | align to $__interval using avg | group using avg
+`homeassistant-metrics`:`ha.sensor.temperature` | where entity_id == #/_temperatur$/ and not entity_id == #/^sensor\.wetter/ | align to $__interval using avg | group by friendly_name using avg
+`homeassistant-metrics`:`ha.sensor.humidity` | where entity_id != "sensor.wetter_absolute_luftfeuchte" | align to $__interval using avg | group by friendly_name using avg
+`homeassistant-metrics`:`ha.sensor.carbon_dioxide` | align to $__interval using avg | group by friendly_name using avg
+`homeassistant-metrics`:`ha.sensor.illuminance` | align to $__interval using avg | group by friendly_name using avg
+`homeassistant-metrics`:`ha.sensor.pm25` | align to $__interval using avg | group by friendly_name using avg
+`homeassistant-metrics`:`ha.sensor.pm10` | align to $__interval using avg | group by friendly_name using avg
+`homeassistant-metrics`:`ha.sensor.power` | where entity_id == "sensor.total_house_load" | align to $__interval using last | group using avg
+`homeassistant-metrics`:`ha.sensor.power` | where entity_id == #/^sensor\.smart_switch_.*_power$/ | align to $__interval using avg | group using sum
+`homeassistant-metrics`:`ha.sensor.voltage` | align to $__interval using avg | group using avg
+`homeassistant-metrics`:`ha.sensor.monetary.net` | align to $__interval using last | group using avg
+`homeassistant-metrics`:`ha.sensor.power` | where entity_id == #/^sensor\.smart_switch_.*_power$/ | align to $__interval using avg | group by friendly_name using avg
+`homeassistant-metrics`:`ha.sensor.power` | where entity_id == "sensor.total_house_load" or entity_id == "sensor.tasmota_lk13be_power" | align to $__interval using avg | group by friendly_name using avg
+`homeassistant-metrics`:`ha.sensor.voltage` | align to $__interval using avg | group by friendly_name using avg
+`homeassistant-metrics`:`ha.sensor.current` | align to $__interval using avg | group by friendly_name using avg
+`homeassistant-metrics`:`ha.sensor.monetary.net` | align to $__interval using avg | group by friendly_name using avg

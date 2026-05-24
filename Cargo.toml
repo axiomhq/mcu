@@ -1,0 +1,23 @@
+[package]
+name = "metrics-tui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ratatui = { version = "0.29", features = ["widget-calendar"] }
+crossterm = "0.28"
+anyhow = "1"
+tui-textarea = { version = "0.7.0", features = ["crossterm"] }
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "sync", "time", "macros"] }
+serde = { version = "1.0.228", features = ["derive"] }
+toml = "1.1.2"
+reqwest = { version = "0.13.3", default-features = false, features = ["json", "rustls"] }
+serde_json = "1.0.149"
+mpl-lang = { version = "0.5.3", default-features = false, path = "../mpl" }
+pest = "2.8.6"
+mpl-language-server = { version = "0.5.3", path = "../mpl/extra/mpl-language-server" }
+miette = "7.6.0"
+time = { version = "0.3", features = ["formatting", "macros", "parsing"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
