@@ -1,1 +1,4 @@
 /target
+# Scratch MPL buffers kept at the repo root (`current.mpl`, etc.).
+# Anchored so nested fixtures under `tests/` are still tracked.
+/*.mpl
