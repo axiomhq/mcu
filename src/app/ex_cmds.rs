@@ -56,7 +56,7 @@ impl App {
             "wq" => self.cmd_write_quit(args.first().copied(), bang),
             "x" => self.cmd_update_quit(args.first().copied()),
             "e" | "edit" => self.cmd_edit(args.first().copied(), bang),
-            "r" | "run" => self.run_query(),
+            "r" | "run" => self.cmd_run(args.first().copied()),
             "ds" | "datasets" => self.fetch_datasets(),
             "m" | "metrics" => self.fetch_metrics_for_current_query(),
             "refresh" => {
@@ -663,6 +663,29 @@ impl App {
             }
             let _ = tx.send(event_ctor(result));
         });
+    }
+
+    /// `:run [target]` — unified "refetch" command.
+    ///
+    /// * `:run` — current context: editor query in Solo, focused tile in Grid.
+    /// * `:run tile` — refetch the focused tile (Grid only).
+    /// * `:run dashboard` — refetch every tile on the loaded dashboard.
+    fn cmd_run(&mut self, target: Option<&str>) {
+        match target {
+            None => match self.view_mode {
+                ViewMode::Grid => self.run_focused_tile_query(),
+                ViewMode::Solo => self.run_query(),
+            },
+            Some("tile") => self.run_focused_tile_query(),
+            Some("dashboard") => {
+                self.run_tile_queries();
+                self.status =
+                    format!("refetching {} tile(s)…", self.tile_results.len().max(1));
+            }
+            Some(other) => self.set_error(format!(
+                ":run {other}: unknown target (try `tile` or `dashboard`)"
+            )),
+        }
     }
 
     pub(super) fn cmd_quit(&mut self, force: bool) {

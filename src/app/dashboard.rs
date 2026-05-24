@@ -42,7 +42,7 @@ impl App {
         }
         self.status = format!("time: {start} → {end}");
         // Refetch so the dashboard reflects the new window without the
-        // user having to remember `:r` (Solo) or `Ctrl-R` (Grid).
+        // user having to remember per-mode shortcuts; `:run` handles both.
         if self.view_mode == ViewMode::Grid && self.loaded_dashboard.is_some() {
             self.run_tile_queries();
         } else if !self.query_text().trim().is_empty() {

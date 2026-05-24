@@ -82,8 +82,6 @@ Enter / v	zoom selected tile into solo view
 m / s	enter Move / Resize sub-mode (Enter to confirm, Esc to cancel)
 a	add a new tile (kind picker overlay)
 d	delete selected tile (y to confirm)
-R	re-run the focused tile's query
-Ctrl-r	re-run every tile's query
 Ctrl-d / Ctrl-u	scroll grid down / up by 10 rows
 Ctrl-f / Ctrl-b	scroll grid down / up by 20 rows
 g / G	jump to top / bottom of grid
@@ -110,7 +108,9 @@ Esc	close popup / return to Normal
 :wq / :x	write and quit (always / when dirty)
 :e <path> / :e!	edit file (force-reload current with `!`)
 :q / :q!	quit / force-quit (discard changes)
-:r / :run	run query
+:r / :run	run current context (editor query in Solo, focused tile in Grid)
+:run tile	refetch the focused tile
+:run dashboard	refetch every tile on the loaded dashboard
 :ds / :datasets	refresh dataset list
 :m / :metrics	refresh metrics for the current dataset
 :refresh	refresh datasets and rerun

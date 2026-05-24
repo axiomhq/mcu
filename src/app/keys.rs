@@ -90,11 +90,6 @@ impl App {
             (Char('s'), M::NONE) => self.enter_tile_resize(),
             (Char('d'), M::NONE) => self.enter_tile_confirm_delete(),
             (Char('a'), M::NONE) => self.enter_tile_add_pick(),
-            (Char('R'), M::SHIFT) | (Char('R'), M::NONE) => self.run_focused_tile_query(),
-            (Char('r'), M::CONTROL) => {
-                self.run_tile_queries();
-                self.status = format!("refetching {} tile(s)…", self.tile_results.len().max(1));
-            }
             (Char('d'), M::CONTROL) =>
                 self.dashboard_scroll = self.dashboard_scroll.saturating_add(10),
             (Char('u'), M::CONTROL) =>

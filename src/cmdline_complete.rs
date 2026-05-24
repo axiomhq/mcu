@@ -144,6 +144,11 @@ pub fn completions_for(
             token,
             range,
         )),
+        ("run" | "r", 1) => Some(filter_candidates(
+            ["tile", "dashboard"].into_iter(),
+            token,
+            range,
+        )),
         _ => None,
     }
 }
