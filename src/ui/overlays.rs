@@ -59,7 +59,7 @@ pub(super) fn draw_tile_inspect_overlay(f: &mut Frame, json: &str, screen: Rect)
     let inner = modal_frame(
         f,
         centered_area(screen, width, height),
-        " tile JSON (any key closes) ",
+        " tile JSON ",
         Color::Magenta,
     );
     f.render_widget(
@@ -231,20 +231,6 @@ pub(super) fn draw_dashinfo_overlay(
         );
     }
 
-    // Footer hint.
-    let hint = Paragraph::new(Line::from(Span::styled(
-        "any key to close",
-        Style::default().fg(Color::DarkGray),
-    )));
-    f.render_widget(
-        hint,
-        Rect {
-            x: inner.x,
-            y: inner.y + inner.height - 1,
-            width: inner.width,
-            height: 1,
-        },
-    );
 }
 
 /// Searchable dashboard picker. Renders as a centred modal with:
@@ -264,7 +250,7 @@ pub(super) fn draw_dashboards_picker(f: &mut Frame, app: &App, screen: Rect) {
     let width = (screen.width.saturating_mul(7) / 10).clamp(40, 100);
     let height = (screen.height.saturating_mul(7) / 10).clamp(10, 30);
     let title = format!(
-        " dashboards · {}/{}  (Esc closes, Enter selects) ",
+        " dashboards · {}/{} ",
         indices.len(),
         picker.items.len()
     );
@@ -387,7 +373,7 @@ pub(super) fn draw_error_overlay(f: &mut Frame, msg: &str, graph_area: Rect) {
     let inner = modal_frame(
         f,
         centered_area(graph_area, width, height),
-        " error - Esc to dismiss ",
+        " error ",
         Color::Red,
     );
     let lines: Vec<Line<'_>> = wrapped.into_iter().map(Line::from).collect();

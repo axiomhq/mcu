@@ -3,6 +3,21 @@
 This file is the single source of truth for the in-app help modal.
 Open it from anywhere in metrics-tui with `?`. Any key dismisses it.
 
+## Conventions
+
+- **`:q` is the only quit.** There is no bare `q` shortcut anywhere
+  — panes and overlays use Esc instead.
+- **Esc closes / steps back.** It dismisses the current overlay or
+  steps back one level toward the editor: error overlay → cleared;
+  picker → closed; Solo view → back to Grid; sidebar pane → back
+  to editor. Solo view is conceptually a full-screen overlay over
+  the dashboard grid, so Esc returns to Grid.
+- **`Enter` commits in pickers and forms**, and runs the query in
+  the editor.
+- **Destructive ex-commands take no bang.** `:dash save`,
+  `:dash rm`, `:tile rm` mean what they say; `!` is reserved for
+  the vim-standard "force" semantics on `:q!`, `:e!`, `:wq!`.
+
 Format used by the in-app renderer:
 
 - Lines starting with `## ` become a section heading.

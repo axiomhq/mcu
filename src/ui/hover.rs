@@ -87,6 +87,6 @@ pub(super) fn draw_hover_popup(f: &mut Frame, app: &mut App, editor_area: Rect) 
         return;
     }
 
-    let inner = modal_frame(f, area, " hover - any key dismisses ", Color::Cyan);
+    let inner = modal_frame(f, area, " hover ", Color::Cyan);
     f.render_widget(Paragraph::new(lines), inner);
 }

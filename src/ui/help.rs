@@ -37,13 +37,9 @@ pub(super) fn draw_help_modal(f: &mut Frame, scroll: u16, graph_area: Rect) {
     let scroll = scroll.min(max_scroll);
 
     let title = if max_scroll == 0 {
-        " help · any key dismisses ".to_string()
+        " help ".to_string()
     } else {
-        format!(
-            " help · j/k scroll · g/G top/bottom · any other key dismisses ({}/{}) ",
-            scroll + 1,
-            max_scroll + 1
-        )
+        format!(" help · {}/{} ", scroll + 1, max_scroll + 1)
     };
     let inner = modal_frame(
         f,
