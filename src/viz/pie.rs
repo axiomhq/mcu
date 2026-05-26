@@ -18,11 +18,7 @@ use crate::chart::Series;
 /// share_0_to_1)`, sorted descending by value, with all-negative or
 /// zero-total inputs returning an empty vec. Extracted so it's directly
 /// unit-testable.
-pub(super) fn pie_rows(
-    series: &[Series],
-    hidden: &[bool],
-    agg: Agg,
-) -> Vec<(usize, f64, f64)> {
+pub(super) fn pie_rows(series: &[Series], hidden: &[bool], agg: Agg) -> Vec<(usize, f64, f64)> {
     let raw: Vec<(usize, f64)> = series
         .iter()
         .enumerate()

@@ -1,4 +1,4 @@
-# metrics-tui — Implementation Plan
+# mcu — Implementation Plan
 
 This plan is split into incremental steps under [`plan/`](plan/). Each step should leave the
 application fully functional on its own: buildable, runnable, and improved over the previous step.

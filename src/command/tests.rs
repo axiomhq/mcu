@@ -273,8 +273,55 @@ fn ctrl_r_is_redo() {
 }
 
 #[test]
-fn plain_r_is_refresh_query() {
-    assert_eq!(run(&[k('r')]), vec![Step::Emit(Command::RefreshQuery)]);
+fn r_then_char_is_replace() {
+    // Vim `r<c>`: the parser pends after `r`, then emits ReplaceChar
+    // with the next char as the replacement. Default count is 1.
+    assert_eq!(
+        run(&[k('r'), k('x')]),
+        vec![
+            Step::Pending,
+            Step::Emit(Command::ReplaceChar { ch: 'x', count: 1 })
+        ]
+    );
+}
+
+#[test]
+fn count_r_char_carries_the_count() {
+    // `3rz` replaces three chars with `z`.
+    assert_eq!(
+        run(&[k('3'), k('r'), k('z')]),
+        vec![
+            Step::Pending, // digit
+            Step::Pending, // r
+            Step::Emit(Command::ReplaceChar { ch: 'z', count: 3 })
+        ]
+    );
+}
+
+#[test]
+fn r_enter_replaces_with_newline() {
+    use ratatui::crossterm::event::KeyCode;
+    let enter_key = ratatui::crossterm::event::KeyEvent::new(
+        KeyCode::Enter,
+        ratatui::crossterm::event::KeyModifiers::NONE,
+    );
+    assert_eq!(
+        run(&[k('r'), enter_key]),
+        vec![
+            Step::Pending,
+            Step::Emit(Command::ReplaceChar { ch: '\n', count: 1 })
+        ]
+    );
+}
+
+#[test]
+fn r_then_esc_cancels() {
+    use ratatui::crossterm::event::KeyCode;
+    let esc_key = ratatui::crossterm::event::KeyEvent::new(
+        KeyCode::Esc,
+        ratatui::crossterm::event::KeyModifiers::NONE,
+    );
+    assert_eq!(run(&[k('r'), esc_key]), vec![Step::Pending, Step::Cancel]);
 }
 
 #[test]

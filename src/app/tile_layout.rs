@@ -6,25 +6,13 @@
 //! Everything here is pure (no `App` borrow) so each piece can be
 //! unit-tested in isolation.
 
+use crate::axiom::ChartKnownExt;
 use crate::dashboard::VizKind;
 
-pub(crate) fn add_pick_kinds() -> &'static [crate::dashboard::VizKind] {
-    use crate::dashboard::VizKind;
-    &[
-        VizKind::Line,
-        VizKind::Bar,
-        VizKind::Area,
-        VizKind::Scatter,
-        VizKind::Statistic,
-        VizKind::TopList,
-        VizKind::Pie,
-        VizKind::Heatmap,
-        VizKind::Table,
-        VizKind::LogStream,
-        VizKind::MonitorList,
-        VizKind::Note,
-        VizKind::Spacer,
-    ]
+/// Backwards-compatible alias for [`VizKind::ALL`]. Kept so add-pick /
+/// open-pick call sites don't need a one-line edit each.
+pub(crate) fn add_pick_kinds() -> &'static [VizKind] {
+    VizKind::ALL
 }
 
 /// Cardinal directions for spatial navigation in the dashboard grid.
@@ -63,14 +51,14 @@ pub(crate) fn pick_next_chart_in_direction(
             None => (0.0, 0.0),
         }
     }
-    let src_id = charts.get(selected)?.base().id.clone();
+    let src_id = charts.get(selected)?.known_base().id.clone();
     let (sx, sy) = centroid(layout, &src_id);
     let mut best: Option<(usize, f32)> = None;
     for (i, c) in charts.iter().enumerate() {
         if i == selected {
             continue;
         }
-        let (cx, cy) = centroid(layout, &c.base().id);
+        let (cx, cy) = centroid(layout, &c.known_base().id);
         // Must actually lie in the requested direction.
         let in_dir = match dir {
             SpatialDir::Right => cx > sx,
@@ -106,7 +94,7 @@ pub(crate) const GRID_COLS: u32 = 12;
 /// keyboard sub-modes + the `:tile` Ex-commands.
 pub(crate) mod tile_ops {
     use super::GRID_COLS;
-    use crate::axiom::{Chart, ChartBase, LayoutItem};
+    use crate::axiom::{Chart, ChartBase, ChartKnownExt, LayoutItem};
 
     /// `true` if `candidate` overlaps any layout entry whose `i` is
     /// **not** `ignore_id`. Two rectangles overlap when they share at
@@ -197,7 +185,7 @@ pub(crate) mod tile_ops {
     ) -> Result<(), &'static str> {
         let cidx = charts
             .iter()
-            .position(|c| c.base().id == chart_id)
+            .position(|c| c.known_base().id == chart_id)
             .ok_or("unknown chart id")?;
         charts.remove(cidx);
         layout.retain(|l| l.i != chart_id);
@@ -243,7 +231,7 @@ pub(crate) mod tile_ops {
     ) -> String {
         // Generate a chart id that doesn't collide.
         let used: std::collections::HashSet<&str> =
-            charts.iter().map(|c| c.base().id.as_str()).collect();
+            charts.iter().map(|c| c.known_base().id.as_str()).collect();
         let mut n = charts.len();
         let id = loop {
             let candidate = format!("c{n}");
@@ -260,23 +248,7 @@ pub(crate) mod tile_ops {
             query: Some(serde_json::json!({ "mpl": "" })),
             extras: Default::default(),
         };
-        let chart = match kind {
-            crate::dashboard::VizKind::Line
-            | crate::dashboard::VizKind::Bar
-            | crate::dashboard::VizKind::Area => Chart::TimeSeries(base),
-            crate::dashboard::VizKind::Scatter => Chart::Scatter(base),
-            crate::dashboard::VizKind::Pie => Chart::Pie(base),
-            crate::dashboard::VizKind::Heatmap => Chart::Heatmap(base),
-            crate::dashboard::VizKind::Table => Chart::Table(base),
-            crate::dashboard::VizKind::TopList => Chart::TopK(base),
-            crate::dashboard::VizKind::Statistic => Chart::Statistic(base),
-            crate::dashboard::VizKind::LogStream => Chart::LogStream(base),
-            crate::dashboard::VizKind::Note => Chart::Note(base),
-            crate::dashboard::VizKind::MonitorList | crate::dashboard::VizKind::Spacer => {
-                Chart::TimeSeries(base)
-            }
-        };
-        charts.push(chart);
+        charts.push(kind.to_chart(base));
         layout.push(LayoutItem {
             i: id.clone(),
             x,
@@ -296,21 +268,9 @@ pub(crate) mod tile_ops {
     ) -> Result<(), &'static str> {
         let chart = charts
             .iter_mut()
-            .find(|c| c.base().id == chart_id)
+            .find(|c| c.known_base().id == chart_id)
             .ok_or("unknown chart id")?;
-        // Mutating the inner ChartBase requires going through the enum.
-        let base = match chart {
-            Chart::TimeSeries(b)
-            | Chart::Heatmap(b)
-            | Chart::LogStream(b)
-            | Chart::Pie(b)
-            | Chart::Scatter(b)
-            | Chart::Table(b)
-            | Chart::TopK(b)
-            | Chart::Statistic(b)
-            | Chart::Note(b) => b,
-        };
-        base.name = Some(title.to_string());
+        chart.known_base_mut().name = Some(title.to_string());
         Ok(())
     }
 }
@@ -326,7 +286,7 @@ pub fn build_dashboard_doc_from_buffer(
     kind: VizKind,
     mpl: &str,
 ) -> crate::axiom::DashboardDocument {
-    use crate::axiom::{Chart, ChartBase, DashboardDocument, LayoutItem};
+    use crate::axiom::{ChartBase, DashboardDocument, LayoutItem};
     use serde_json::{Map, json};
 
     let chart_id = "c1".to_string();
@@ -337,19 +297,7 @@ pub fn build_dashboard_doc_from_buffer(
         query: Some(query),
         extras: Default::default(),
     };
-    let chart = match kind {
-        VizKind::Line | VizKind::Bar | VizKind::Area => Chart::TimeSeries(base),
-        VizKind::Scatter => Chart::Scatter(base),
-        VizKind::Pie => Chart::Pie(base),
-        VizKind::Heatmap => Chart::Heatmap(base),
-        VizKind::Table => Chart::Table(base),
-        VizKind::TopList => Chart::TopK(base),
-        VizKind::Statistic => Chart::Statistic(base),
-        VizKind::LogStream => Chart::LogStream(base),
-        VizKind::Note => Chart::Note(base),
-        // TUI-only — fall back to TimeSeries.
-        VizKind::MonitorList | VizKind::Spacer => Chart::TimeSeries(base),
-    };
+    let chart = kind.to_chart(base);
     // Server requires owner, refreshTime, schemaVersion, timeWindow*
     // to be present. We don't model those internally yet, so stash
     // them in `extras` to satisfy the schema.
@@ -374,4 +322,3 @@ pub fn build_dashboard_doc_from_buffer(
         extras,
     }
 }
-

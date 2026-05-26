@@ -131,11 +131,11 @@ pub enum Command {
     },
     EnterInsert(InsertAt),
     EnterCommand,
+    /// Run / re-run the current query. Triggered by `<Enter>` in normal
+    /// mode and by the `:run` (or `:r`) ex-command. There is intentionally
+    /// no single-key `r` binding — that's vim's `r<c>` replace-char and
+    /// shadowing it surprised users.
     RunQuery,
-    /// `r` (Normal, no modifier) — re-runs the current query. Deliberately
-    /// shadows vim's `r<c>` (replace char) because refresh is far more
-    /// useful in this app.
-    RefreshQuery,
     Undo,
     Redo,
     /// `g a` — open the quick-fix picker.
@@ -173,6 +173,14 @@ pub enum Command {
         after: bool,
         count: usize,
     },
+    /// `r<c>` (with optional count) — replace `count` chars at and to
+    /// the right of the cursor with `ch`. `r<Enter>` substitutes a
+    /// newline (matching vim). The parser emits this once the
+    /// replacement key arrives; the host handles the per-char rewrite.
+    ReplaceChar {
+        ch: char,
+        count: usize,
+    },
 }
 
 /// Result of feeding one [`KeyEvent`] to a [`Parser`].
@@ -202,6 +210,10 @@ pub struct Parser {
     awaiting_object: Option<bool>,
     /// After `f`/`F`/`t`/`T`, the next char becomes the find target.
     awaiting_find: Option<FindArgs>,
+    /// `Some(count)` after `r` — the next printable char (or `<Enter>`)
+    /// is the replacement, applied `count` times. `<Esc>` or any other
+    /// non-char key cancels.
+    awaiting_replace: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -216,6 +228,20 @@ impl Parser {
     }
 
     pub fn feed(&mut self, key: KeyEvent) -> Step {
+        // 0a. Replace-char target: the key after `r`. Printable chars and
+        //     `<Enter>` (newline) are valid replacements; anything else
+        //     cancels cleanly so `r<Esc>` aborts.
+        if let Some(count) = self.awaiting_replace.take() {
+            return match key.code {
+                KeyCode::Char(ch) => Step::Emit(Command::ReplaceChar { ch, count }),
+                KeyCode::Enter => Step::Emit(Command::ReplaceChar { ch: '\n', count }),
+                _ => {
+                    self.reset();
+                    Step::Cancel
+                }
+            };
+        }
+
         // 0. Find-char target: any printable char becomes the operand;
         //    anything else cancels. Highest precedence so `f<Esc>` etc.
         //    cleans up cleanly.
@@ -452,7 +478,12 @@ impl Parser {
             }
             (KeyCode::Char('u'), KeyModifiers::NONE) => Command::Undo,
             (KeyCode::Char('r'), KeyModifiers::CONTROL) => Command::Redo,
-            (KeyCode::Char('r'), KeyModifiers::NONE) => Command::RefreshQuery,
+            (KeyCode::Char('r'), KeyModifiers::NONE) => {
+                let count = if self.count == 0 { 1 } else { self.count };
+                self.count = 0;
+                self.awaiting_replace = Some(count);
+                return Step::Pending;
+            }
             (KeyCode::Enter, KeyModifiers::NONE) => Command::RunQuery,
             (KeyCode::Char(':'), KeyModifiers::NONE) => Command::EnterCommand,
             (KeyCode::Char('?'), _) => Command::Help,
@@ -481,6 +512,7 @@ impl Parser {
         self.g_prefix = false;
         self.awaiting_object = None;
         self.awaiting_find = None;
+        self.awaiting_replace = None;
     }
 }
 

@@ -31,7 +31,18 @@ pub(super) fn draw_status(f: &mut Frame, app: &App, area: Rect) {
             crate::app::TileSubMode::Move { .. } => format!("{base}-MOVE"),
             crate::app::TileSubMode::Resize { .. } => format!("{base}-RESIZE"),
             crate::app::TileSubMode::ConfirmDelete => format!("{base}-DEL?"),
-            crate::app::TileSubMode::AddPick { .. } => format!("{base}-ADD"),
+            crate::app::TileSubMode::PickViz {
+                action: crate::app::PickVizAction::Add,
+                ..
+            } => format!("{base}-ADD"),
+            crate::app::TileSubMode::PickViz {
+                action: crate::app::PickVizAction::Open { above: false, .. },
+                ..
+            } => format!("{base}-OPEN↓"),
+            crate::app::TileSubMode::PickViz {
+                action: crate::app::PickVizAction::Open { above: true, .. },
+                ..
+            } => format!("{base}-OPEN↑"),
         };
         (label, Color::Black, Color::Rgb(180, 140, 220))
     } else {
@@ -209,7 +220,7 @@ fn draw_command_line(f: &mut Frame, app: &App, area: Rect) {
     f.set_cursor_position((cursor_col, area.y));
 
     // Tab-completion popup. Floats just above the cmdline.
-    if app.cmdline_completions.visible && !app.cmdline_completions.items.is_empty() {
+    if app.cmdline.completions.visible && !app.cmdline.completions.items.is_empty() {
         draw_cmdline_completion_popup(f, app, area);
     }
 }
@@ -223,8 +234,8 @@ fn draw_cmdline_completion_popup(f: &mut Frame, app: &App, cmdline_area: Rect) {
     if cmdline_area.y == 0 {
         return; // no room above
     }
-    let items = &app.cmdline_completions.items;
-    let selected = app.cmdline_completions.selected;
+    let items = &app.cmdline.completions.items;
+    let selected = app.cmdline.completions.selected;
 
     // Build the spans for each item with spaces between. Highlighted
     // item gets a reverse-video badge.

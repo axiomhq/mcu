@@ -77,25 +77,25 @@ fn implemented_set_matches_current_scope() {
     );
 }
 
-use crate::axiom::{ChartBase, DashboardDocument, DashboardSummary};
+use crate::axiom::{ChartBase, DashboardDocument, DashboardSummary, KnownChart};
 use serde_json::json;
 
 // Fixtures lifted verbatim from `GET /v2/dashboards/uid/…` against
 // a real account. Two MPL examples (home overview) and one APL
 // example (probe-* dashboards).
-const REAL_MPL_BACKTICK_STAT: &str = "`home`:temp\n| where type == \"temperature\"\n| where room != \"Außen\"\n| group using avg";
+const REAL_MPL_BACKTICK_STAT: &str =
+    "`home`:temp\n| where type == \"temperature\"\n| where room != \"Außen\"\n| group using avg";
 const REAL_MPL_BACKTICK_TIMESERIES: &str =
     "`home`:power\n| group by circuit using sum\n| align to 5m using avg";
-const REAL_APL_BRACKET: &str =
-    "[\"axiom-audit-logs\"] | summarize n=count() by bin_auto(_time)";
+const REAL_APL_BRACKET: &str = "[\"axiom-audit-logs\"] | summarize n=count() by bin_auto(_time)";
 
 fn statistic_with_apl(text: &str) -> Chart {
-    Chart::Statistic(crate::axiom::ChartBase {
+    Chart::Known(KnownChart::Statistic(crate::axiom::ChartBase {
         id: "c1".into(),
         name: None,
         query: Some(json!({ "apl": text })),
         extras: Default::default(),
-    })
+    }))
 }
 
 #[test]
@@ -109,12 +109,12 @@ fn real_home_overview_mpl_statistic_classifies_as_mpl() {
 
 #[test]
 fn real_home_overview_mpl_timeseries_classifies_as_mpl() {
-    let chart = Chart::TimeSeries(crate::axiom::ChartBase {
+    let chart = Chart::Known(KnownChart::TimeSeries(crate::axiom::ChartBase {
         id: "c1".into(),
         name: None,
         query: Some(json!({ "apl": REAL_MPL_BACKTICK_TIMESERIES })),
         extras: Default::default(),
-    });
+    }));
     assert!(matches!(extract_query(&chart), Query::Mpl(_)));
 }
 
@@ -123,12 +123,12 @@ fn real_probe_apl_with_bracketed_dataset_classifies_as_apl() {
     // `["axiom-audit-logs"] | summarize n=count() by …` — stored
     // under `apl` on a TimeSeries chart. Pipes don't make this
     // MPL; the leading `[` does make it APL.
-    let chart = Chart::TimeSeries(crate::axiom::ChartBase {
+    let chart = Chart::Known(KnownChart::TimeSeries(crate::axiom::ChartBase {
         id: "c1".into(),
         name: None,
         query: Some(json!({ "apl": REAL_APL_BRACKET })),
         extras: Default::default(),
-    });
+    }));
     assert!(matches!(extract_query(&chart), Query::Apl(_)));
 }
 
@@ -158,7 +158,7 @@ fn bare_identifier_dataset_with_pipes_classifies_as_apl() {
 
 #[test]
 fn explicit_mpl_key_still_wins_when_present() {
-    let chart = Chart::TimeSeries(crate::axiom::ChartBase {
+    let chart = Chart::Known(KnownChart::TimeSeries(crate::axiom::ChartBase {
         id: "c1".into(),
         name: None,
         query: Some(json!({
@@ -166,7 +166,7 @@ fn explicit_mpl_key_still_wins_when_present() {
             "apl": "['logs'] | count",
         })),
         extras: Default::default(),
-    });
+    }));
     match extract_query(&chart) {
         Query::Mpl(s) => assert_eq!(s, "correct:value"),
         other => panic!("expected Mpl, got {other:?}"),
@@ -175,12 +175,12 @@ fn explicit_mpl_key_still_wins_when_present() {
 
 #[test]
 fn extract_query_chart_without_query_yields_empty() {
-    let chart = Chart::TopK(ChartBase {
+    let chart = Chart::Known(KnownChart::TopK(ChartBase {
         id: "c3".into(),
         name: Some("errors".into()),
         query: None,
         extras: Default::default(),
-    });
+    }));
     assert!(matches!(extract_query(&chart), Query::Empty));
 }
 

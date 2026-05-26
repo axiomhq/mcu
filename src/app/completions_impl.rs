@@ -5,7 +5,6 @@
 use super::*;
 
 impl App {
-
     /// Drive the cmdline completion popup on Tab / Shift-Tab. First
     /// Tab from a hidden state: compute fuzzy candidates. A single
     /// match auto-completes + appends a space; multiple matches show
@@ -13,7 +12,7 @@ impl App {
     /// Subsequent Tabs cycle (Shift-Tab cycles backward) and splice
     /// the highlighted candidate over the current token in real time.
     pub fn handle_cmdline_tab(&mut self, backward: bool) {
-        if self.cmdline_completions.visible {
+        if self.cmdline.completions.visible {
             // Popup already visible: cycle.
             return self.move_cmdline_completion(if backward { -1 } else { 1 });
         }
@@ -40,28 +39,28 @@ impl App {
         }
         // Multi: show popup; re-anchor splice range to the spliced text.
         let new_token_end = req.range.0 + top.len();
-        self.cmdline_completions.items = req.items;
-        self.cmdline_completions.selected = 0;
-        self.cmdline_completions.replace_range = (req.range.0, new_token_end);
-        self.cmdline_completions.visible = true;
+        self.cmdline.completions.items = req.items;
+        self.cmdline.completions.selected = 0;
+        self.cmdline.completions.replace_range = (req.range.0, new_token_end);
+        self.cmdline.completions.visible = true;
     }
 
     pub(super) fn move_cmdline_completion(&mut self, delta: isize) {
-        let n = self.cmdline_completions.items.len();
+        let n = self.cmdline.completions.items.len();
         if n == 0 {
             return;
         }
-        let i = self.cmdline_completions.selected as isize + delta;
+        let i = self.cmdline.completions.selected as isize + delta;
         let wrapped = ((i % n as isize) + n as isize) % n as isize;
-        self.cmdline_completions.selected = wrapped as usize;
+        self.cmdline.completions.selected = wrapped as usize;
         // Splice the new selection into the buffer so the user sees
         // each candidate as they cycle (vim wildmenu style).
-        let item = self.cmdline_completions.items[self.cmdline_completions.selected].clone();
-        let range = self.cmdline_completions.replace_range;
+        let item = self.cmdline.completions.items[self.cmdline.completions.selected].clone();
+        let range = self.cmdline.completions.replace_range;
         self.splice_cmdline_token(range, &item);
         // Re-anchor the range so the next cycle replaces the just-
         // spliced text instead of an older slice.
-        self.cmdline_completions.replace_range = (range.0, range.0 + item.len());
+        self.cmdline.completions.replace_range = (range.0, range.0 + item.len());
     }
 
     pub(super) fn accept_cmdline_completion(&mut self) {
@@ -72,7 +71,7 @@ impl App {
             self.cmdline.buf.push(' ');
             self.cmdline.cursor = self.cmdline.buf.chars().count();
         }
-        self.cmdline_completions.hide();
+        self.cmdline.completions.hide();
     }
 
     /// Replace `buf[range.0..range.1]` with `text` and reposition the
@@ -122,7 +121,7 @@ impl App {
         completions::compute(
             &query,
             cursor_byte,
-            &self.system_params,
+            &self.params.system,
             &self.cache.read().unwrap(),
         )
     }

@@ -76,7 +76,11 @@ pub(super) fn draw_statistic(
     // sparkline capped at 3 rows, which left up to ~5 empty rows below
     // the label on tall statistic tiles.
     let number_rows: u16 = 2; // value + label
-    let pad_top: u16 = if inner.height >= number_rows + 3 { 1 } else { 0 };
+    let pad_top: u16 = if inner.height >= number_rows + 3 {
+        1
+    } else {
+        0
+    };
     let number_area_h = (pad_top + number_rows).min(inner.height);
     let spark_rows = inner.height.saturating_sub(number_area_h);
     let chunks = Layout::default()

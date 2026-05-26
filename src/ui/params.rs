@@ -12,7 +12,7 @@ use super::pane_block;
 use crate::app::App;
 
 /// Right-hand pane next to the editor. Lists every CLI/`:param` value
-/// in `app.cli_params` as `$name = value`. Read-only; values are
+/// in `app.params.cli` as `$name = value`. Read-only; values are
 /// managed via `:p NAME=VALUE` / `:p NAME=` / `:p!`. Empty state shows
 /// a hint pointing at `:help` so the surface is discoverable.
 pub(super) fn draw_params(f: &mut Frame, app: &App, area: Rect, focused: bool) {
@@ -103,7 +103,7 @@ pub(super) fn draw_params(f: &mut Frame, app: &App, area: Rect, focused: bool) {
             }
 
             let mut line = Line::from(spans);
-            if focused && i == app.params_selected {
+            if focused && i == app.params.selected {
                 line.style = selected_bg;
                 for sp in &mut line.spans {
                     sp.style = sp.style.patch(selected_bg);

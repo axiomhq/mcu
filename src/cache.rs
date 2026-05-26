@@ -1,7 +1,7 @@
 //! On-disk discovery cache.
 //!
-//! Stored as JSON at `$XDG_CACHE_HOME/metrics-tui/discovery.json` (or
-//! `$HOME/.cache/metrics-tui/discovery.json`). Holds the list of datasets and
+//! Stored as JSON at `$XDG_CACHE_HOME/mcu/discovery.json` (or
+//! `$HOME/.cache/mcu/discovery.json`). Holds the list of datasets and
 //! per-dataset metric inventories so the app starts with usable state offline
 //! and avoids re-fetching during a session.
 //!
@@ -368,12 +368,7 @@ impl Cache {
     /// from the dashboard tag picker where there's no editor
     /// query-hash to scope by — the tile's MPL is the source of
     /// truth, but its hash isn't the same as the editor's.
-    pub fn set_legend_tags_for_metric(
-        &mut self,
-        dataset: &str,
-        metric: &str,
-        tags: Vec<String>,
-    ) {
+    pub fn set_legend_tags_for_metric(&mut self, dataset: &str, metric: &str, tags: Vec<String>) {
         if tags.is_empty() {
             if let Some(per_metric) = self.data.legend_tags_by_metric.get_mut(dataset) {
                 per_metric.remove(metric);
@@ -435,10 +430,11 @@ impl Cache {
 }
 
 fn default_path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
-    Some(base.join("metrics-tui").join("discovery.json"))
+    // `etcetera` handles XDG_CACHE_HOME / ~/.cache on Linux,
+    // ~/Library/Caches on macOS, and %LOCALAPPDATA% on Windows.
+    use etcetera::BaseStrategy;
+    let strategy = etcetera::choose_base_strategy().ok()?;
+    Some(strategy.cache_dir().join("mcu").join("discovery.json"))
 }
 
 fn read_data_from_disk(p: &Path) -> Option<CacheData> {
@@ -452,12 +448,25 @@ fn atomic_write(path: &Path, data: &CacheData) -> Result<()> {
 }
 
 fn atomic_write_text(path: &Path, contents: &str) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
-    }
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, contents).with_context(|| format!("writing {}", tmp.display()))?;
-    fs::rename(&tmp, path).with_context(|| format!("renaming into {}", path.display()))?;
+    use std::io::Write;
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("cache path {:?} has no parent directory", path))?;
+    fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    // `NamedTempFile::new_in` creates a uniquely-named temp file in the
+    // same directory as the target, so the subsequent `persist` is a
+    // same-filesystem rename (atomic on POSIX). Collisions between
+    // concurrent writers can't happen even if two mcu instances
+    // race — each gets its own temp name.
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)
+        .with_context(|| format!("creating temp file in {}", parent.display()))?;
+    tmp.write_all(contents.as_bytes())
+        .with_context(|| format!("writing {}", tmp.path().display()))?;
+    tmp.as_file()
+        .sync_all()
+        .with_context(|| format!("flushing {}", tmp.path().display()))?;
+    tmp.persist(path)
+        .with_context(|| format!("renaming into {}", path.display()))?;
     Ok(())
 }
 

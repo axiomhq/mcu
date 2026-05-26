@@ -84,7 +84,7 @@ user owns the repo, so it's a self-merge.
 
 ### Fallback if upstream change can't happen
 
-Vendor the engine source into `metrics-tui` under `src/mpl_engine/` and
+Vendor the engine source into `mcu` under `src/mpl_engine/` and
 strip `#[wasm_bindgen]` annotations. Drift risk vs upstream; would need a
 sync script in `scripts/` and CI to flag divergence. Pursue only as a
 short-term unblock.
@@ -205,7 +205,7 @@ that copy once `mpl-lang` exposes it.
 
 - `replace` / `join` pipe rules (the upstream engine intentionally
   omits them from completion until parser support stabilises).
-- A full LSP — none of this needs to leave the metrics-tui process.
+- A full LSP — none of this needs to leave the mcu process.
 
 ## Tracking
 

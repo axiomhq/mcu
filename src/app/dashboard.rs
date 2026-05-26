@@ -5,9 +5,8 @@
 use super::*;
 
 impl App {
-
     /// Active query time range, in the order the Axiom API wants it
-    /// (`start`, `end`). Sourced from `self.time_range`, which is
+    /// (`start`, `end`). Sourced from `self.time.range`, which is
     /// seeded from the loaded dashboard's `timeWindowStart`/`End`
     /// (or the legacy `now-1h`/`now` defaults) and mutated in place
     /// by `:time`. Both editor (`run_query`) and per-tile fetches
@@ -21,8 +20,8 @@ impl App {
     /// (`now-7d`) and 400s otherwise.
     pub fn active_time_range(&self) -> (String, String) {
         (
-            normalize_time_expr(&self.time_range.start),
-            normalize_time_expr(&self.time_range.end),
+            normalize_time_expr(&self.time.range.start),
+            normalize_time_expr(&self.time.range.end),
         )
     }
 
@@ -31,7 +30,7 @@ impl App {
     /// the dashboard dirty, status-line the change, and kick a refetch
     /// so the user sees the new window immediately.
     pub(super) fn set_time_range(&mut self, start: String, end: String) {
-        self.time_range = TimeRange {
+        self.time.range = TimeRange {
             start: start.clone(),
             end: end.clone(),
         };
@@ -196,12 +195,12 @@ impl App {
         // background fetch — we just promote it. A subsequent `:r`
         // (or the editor's run-on-Enter) will refresh it if the
         // user wants a fresh point-in-time.
-        let chart_id = chart.base().id.clone();
+        let chart_id = chart.known_base().id.clone();
         if let Some(tile) = self.tile_results.get(&chart_id) {
             self.series = tile.series.clone();
-            self.legend_hidden = vec![false; self.series.len()];
-            if self.legend_selected >= self.series.len() {
-                self.legend_selected = 0;
+            self.legend.hidden = vec![false; self.series.len()];
+            if self.legend.selected >= self.series.len() {
+                self.legend.selected = 0;
             }
             if let Some(tid) = tile.trace_id.clone() {
                 self.last_trace_id = Some(tid);
@@ -211,8 +210,8 @@ impl App {
             // has no MPL). Clear so the user doesn't see stale
             // demo data labelled with a different tile's title.
             self.series.clear();
-            self.legend_hidden.clear();
-            self.legend_selected = 0;
+            self.legend.hidden.clear();
+            self.legend.selected = 0;
         }
         self.view_mode = ViewMode::Solo;
         self.focus = Pane::Editor;
@@ -221,7 +220,7 @@ impl App {
         // selection (or clear if there's nothing cached).
         self.reload_legend_label_tags();
         let title = chart
-            .base()
+            .known_base()
             .name
             .clone()
             .filter(|s| !s.is_empty())
@@ -229,11 +228,16 @@ impl App {
         self.status = format!("zoomed `{title}`");
     }
 
-    pub(super) fn adopt_dashboard(&mut self, uid: String, resource: crate::axiom::DashboardSummary) {
+    pub(super) fn adopt_dashboard(
+        &mut self,
+        uid: String,
+        resource: crate::axiom::DashboardSummary,
+    ) {
+        use crate::axiom::DashboardSummaryExt;
         use crate::dashboard::Query;
-        let name = resource.name().to_string();
+        let name = resource.name_or_unnamed().to_string();
         let chart_count = resource.dashboard.charts.len();
-        self.time_range = TimeRange::from_resource(&resource);
+        self.time.range = TimeRange::from_resource(&resource);
         // Focus snaps to the first chart — matches the grid's
         // initial selection and the prior `Dashboard::tiles[0]`
         // semantics. Empty dashboards fall through to defaults.
@@ -246,6 +250,16 @@ impl App {
         self.viz_opts.clear();
         self.last_picked_dashboard = Some(uid);
         self.loaded_dashboard = Some(resource);
+        // The dashboard is now the canonical artifact. `:w` and
+        // friends route on `buffer_mode` and expect this to flip so
+        // a save targets the server (or a `:w <path>` JSON dump),
+        // not the focused tile's editor buffer. File-loaded
+        // dashboards set the same flag in `open_file`.
+        self.buffer_mode = BufferMode::Dashboard;
+        // No on-disk backing for server-loaded dashboards; clear any
+        // stale `current_file` from a previous MPL session so `:w`
+        // routes to the server PUT path, not a leftover .mpl path.
+        self.current_file = None;
 
         let pragma_line = format!("// @viz {}\n", focused_kind.as_str());
         // Query::Empty leaves the editor alone — the tile renderer
@@ -288,7 +302,10 @@ impl App {
     /// the editor untouched). APL queries get a `// APL query —
     /// execution lands in step 14b` banner so the MPL parser doesn't
     /// flag every line.
-    pub(super) fn build_query_seed(pragma_line: &str, query: &crate::dashboard::Query) -> Option<String> {
+    pub(super) fn build_query_seed(
+        pragma_line: &str,
+        query: &crate::dashboard::Query,
+    ) -> Option<String> {
         use crate::dashboard::Query;
         match query {
             Query::Mpl(mpl) => Some(format!("{pragma_line}{mpl}")),

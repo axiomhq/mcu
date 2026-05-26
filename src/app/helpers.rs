@@ -8,18 +8,19 @@ use std::sync::{Arc, RwLock};
 
 use tui_textarea::TextArea;
 
-use crate::axiom::{
-    Client as AxiomClient, MetricsQueryResponse, MetricsSeries,
-};
+use crate::axiom::{Client as AxiomClient, MetricsQueryResponse, MetricsSeries};
 use crate::cache::{Cache, EdgeRoute};
-use crate::chart::{Series, color_for};
+use crate::chart::{Series, color_for, tag_text};
 use crate::completions;
 use crate::mpl;
 use crate::viz;
 
 use super::types::CompletionState;
 
-pub(super) fn state_from(payload: completions::CompletionPayload, selected: usize) -> CompletionState {
+pub(super) fn state_from(
+    payload: completions::CompletionPayload,
+    selected: usize,
+) -> CompletionState {
     let kind_label = completions::kind_label(&payload.kind);
     CompletionState {
         visible: true,
@@ -186,6 +187,17 @@ pub(super) async fn resolve_route(
     if let Some(r) = cache.read().unwrap().edge_route_for(dataset) {
         return Ok(r);
     }
+    refresh_dataset_route(cache, client, dataset).await
+}
+
+/// Force a `list_datasets` refresh and re-resolve the route for `dataset`.
+/// Used both on cold cache miss and after a metrics 404 (which we treat as
+/// a sign that the cached `edgeDeployment` for the dataset is stale).
+pub(super) async fn refresh_dataset_route(
+    cache: &Arc<RwLock<Cache>>,
+    client: &AxiomClient,
+    dataset: &str,
+) -> anyhow::Result<EdgeRoute> {
     let datasets = client
         .list_datasets()
         .await
@@ -196,6 +208,23 @@ pub(super) async fn resolve_route(
         .unwrap()
         .edge_route_for(dataset)
         .ok_or_else(|| anyhow::anyhow!("dataset `{dataset}` not found in this deployment"))
+}
+
+/// True iff `err` (or any frame in its anyhow chain) is an axiom-rs API
+/// error reporting HTTP 404.
+///
+/// Metrics-info / `_mpl` calls go through a per-dataset edge URL that we
+/// cache via `cache::EdgeRoute`. When that URL is stale (the dataset's
+/// `edgeDeployment` moved), the server returns 404; callers use this
+/// predicate to drive a one-shot route refresh + retry instead of
+/// surfacing the error to the user.
+pub(super) fn is_axiom_404(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<axiom_rs::Error>()
+            .map(|e| matches!(e, axiom_rs::Error::Axiom(a) if a.status == 404))
+            .unwrap_or(false)
+    })
 }
 
 /// Normalise a time-range string before sending it to the metrics
@@ -219,8 +248,7 @@ pub(super) fn parse_iso_date(s: &str) -> Option<time::Date> {
     {
         return Some(odt.date());
     }
-    let ymd =
-        time::format_description::parse("[year]-[month]-[day]").ok()?;
+    let ymd = time::format_description::parse("[year]-[month]-[day]").ok()?;
     time::Date::parse(s, &ymd).ok()
 }
 
@@ -233,24 +261,38 @@ pub(super) async fn run_query_task(
     end: &str,
     params: &std::collections::BTreeMap<String, String>,
 ) -> anyhow::Result<MetricsQueryResponse> {
-    let route = resolve_route(cache, client, dataset).await?;
-    client
-        .query_mpl(
-            &route.url,
-            route.deployment.as_deref(),
-            mpl,
-            start,
-            end,
-            params,
-        )
-        .await
+    let mut route = resolve_route(cache, client, dataset).await?;
+    let mut refreshed = false;
+    loop {
+        let result = client
+            .query_mpl(
+                &route.url,
+                route.deployment.as_deref(),
+                mpl,
+                start,
+                end,
+                params,
+            )
+            .await;
+        match result {
+            Err(e) if !refreshed && is_axiom_404(&e) => {
+                refreshed = true;
+                route = refresh_dataset_route(cache, client, dataset).await?;
+            }
+            other => return other,
+        }
+    }
 }
 
 /// Build a `Diagnostic` for a pragma parse failure at `line_idx`.
 /// Column points at column 1 of that line; length spans the line. This
 /// matches how the engine reports its own line-level diagnostics, so the
 /// status bar treatment is uniform.
-pub(super) fn pragma_diagnostic(text: &str, line_idx: usize, err: &viz::PragmaError) -> mpl::Diagnostic {
+pub(super) fn pragma_diagnostic(
+    text: &str,
+    line_idx: usize,
+    err: &viz::PragmaError,
+) -> mpl::Diagnostic {
     // Byte offset of the start of `line_idx`.
     let byte_offset = text
         .split_inclusive('\n')
@@ -282,7 +324,7 @@ pub(super) fn cache_save_with<F: FnOnce(&mut Cache)>(cache: &Arc<RwLock<Cache>>,
     let mut c = cache.write().unwrap();
     f(&mut c);
     if let Err(e) = c.save() {
-        eprintln!("metrics-tui: cache save failed: {e}");
+        eprintln!("mcu: cache save failed: {e}");
     }
 }
 
@@ -348,7 +390,7 @@ pub(super) fn metrics_series_to_series(s: &MetricsSeries, palette_index: usize) 
         })
         .collect();
 
-    let mut tag_pairs: Vec<(String, String)> =
+    let mut tag_pairs: Vec<(String, serde_json::Value)> =
         s.tags.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     tag_pairs.sort_by(|a, b| a.0.cmp(&b.0));
 
@@ -360,15 +402,18 @@ pub(super) fn metrics_series_to_series(s: &MetricsSeries, palette_index: usize) 
     }
 }
 
-pub(super) fn format_series_name(metric: &str, tags: &[(String, String)]) -> String {
+pub(super) fn format_series_name(metric: &str, tags: &[(String, serde_json::Value)]) -> String {
     // Prefer a short identifying tag set (room/host/service/device); fall back to all tags.
     const PREFERRED: &[&str] = &["room", "host", "service.name", "device", "endpoint"];
     let mut chosen: Vec<String> = PREFERRED
         .iter()
-        .filter_map(|k| tags.iter().find(|(t, _)| t == k).map(|(_, v)| v.clone()))
+        .filter_map(|k| tags.iter().find(|(t, _)| t == k).map(|(_, v)| tag_text(v)))
         .collect();
     if chosen.is_empty() {
-        chosen = tags.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        chosen = tags
+            .iter()
+            .map(|(k, v)| format!("{k}={}", tag_text(v)))
+            .collect();
     }
     if chosen.is_empty() {
         metric.to_string()
@@ -406,4 +451,3 @@ pub(super) fn demo_series() -> Vec<Series> {
         },
     ]
 }
-

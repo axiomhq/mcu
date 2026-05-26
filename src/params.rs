@@ -89,7 +89,7 @@ pub struct ParamRow {
     /// the buffer doesn't declare.
     pub declared_type: Option<String>,
     pub optional: bool,
-    /// Current value from `app.cli_params`, if any.
+    /// Current value from `app.params.cli`, if any.
     pub value: Option<String>,
     pub status: ParamStatus,
 }

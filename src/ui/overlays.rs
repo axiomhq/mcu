@@ -15,6 +15,7 @@ use ratatui::{
 
 use super::{centered_area, modal_frame, wrap_message};
 use crate::app::App;
+use crate::axiom::{ChartKnownExt, DashboardSummaryExt};
 
 /// Modal overlay for `d` (delete) confirmation. Renders over the
 /// dashboard pane; `y` confirms, any other key cancels (handled in
@@ -24,7 +25,12 @@ pub(super) fn draw_confirm_delete_overlay(f: &mut Frame, app: &App, screen: Rect
         .loaded_dashboard
         .as_ref()
         .and_then(|r| r.dashboard.charts.get(app.selected_chart_idx))
-        .map(|c| c.base().name.clone().unwrap_or_else(|| c.base().id.clone()))
+        .map(|c| {
+            c.known_base()
+                .name
+                .clone()
+                .unwrap_or_else(|| c.known_base().id.clone())
+        })
         .unwrap_or_default();
     let lines = vec![
         Line::from(Span::styled(
@@ -41,7 +47,12 @@ pub(super) fn draw_confirm_delete_overlay(f: &mut Frame, app: &App, screen: Rect
     ];
     let width = 50u16.min(screen.width.saturating_sub(4));
     let height = (lines.len() as u16 + 2).min(screen.height.saturating_sub(2));
-    let inner = modal_frame(f, centered_area(screen, width, height), " delete ", Color::Red);
+    let inner = modal_frame(
+        f,
+        centered_area(screen, width, height),
+        " delete ",
+        Color::Red,
+    );
     f.render_widget(
         Paragraph::new(lines).alignment(ratatui::layout::Alignment::Center),
         inner,
@@ -70,18 +81,24 @@ pub(super) fn draw_tile_inspect_overlay(f: &mut Frame, json: &str, screen: Rect)
     );
 }
 
-/// Modal kind-picker for `a` (add tile). Up/Down navigate, Enter
-/// commits.
-pub(super) fn draw_add_pick_overlay(f: &mut Frame, cursor: usize, screen: Rect) {
+/// Modal viz-kind picker shared by `a` (add tile) and `o`/`O` (open
+/// new row). Up/Down navigate, Enter commits. The frame title
+/// reflects the action so the user knows which path they're on.
+pub(super) fn draw_pick_viz_overlay(
+    f: &mut Frame,
+    cursor: usize,
+    action: crate::app::PickVizAction,
+    screen: Rect,
+) {
     let kinds = crate::app::add_pick_kinds();
     let width = 30u16.min(screen.width.saturating_sub(4));
     let height = (kinds.len() as u16 + 3).min(screen.height.saturating_sub(2));
-    let inner = modal_frame(
-        f,
-        centered_area(screen, width, height),
-        " add tile ",
-        Color::Green,
-    );
+    let title = match action {
+        crate::app::PickVizAction::Add => " add tile ",
+        crate::app::PickVizAction::Open { above: false, .. } => " open below ",
+        crate::app::PickVizAction::Open { above: true, .. } => " open above ",
+    };
+    let inner = modal_frame(f, centered_area(screen, width, height), title, Color::Green);
     let items: Vec<ListItem<'_>> = kinds
         .iter()
         .enumerate()
@@ -110,7 +127,7 @@ pub(super) fn draw_dashinfo_overlay(
 ) {
     let width = (screen.width.saturating_mul(8) / 10).clamp(50, 120);
     let height = (screen.height.saturating_mul(8) / 10).clamp(12, 40);
-    let title = format!(" dashboard · {} ", resource.name());
+    let title = format!(" dashboard · {} ", resource.name_or_unnamed());
     let inner = modal_frame(
         f,
         centered_area(screen, width, height),
@@ -138,7 +155,7 @@ pub(super) fn draw_dashinfo_overlay(
         Span::raw(
             resource
                 .updated_at
-                .clone()
+                .map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
                 .unwrap_or_else(|| "-".to_string()),
         ),
     ]));
@@ -201,7 +218,7 @@ pub(super) fn draw_dashinfo_overlay(
         ]);
         let rows: Vec<Line<'_>> = std::iter::once(header_row)
             .chain(doc.charts.iter().map(|c| {
-                let b = c.base();
+                let b = c.known_base();
                 let id_short = if b.id.len() > 12 {
                     format!("{}...", &b.id[..11])
                 } else {
@@ -209,7 +226,11 @@ pub(super) fn draw_dashinfo_overlay(
                 };
                 Line::from(vec![
                     Span::styled(
-                        format!("{:<10}", c.type_str()),
+                        format!(
+                            "{:<10}",
+                            c.type_str()
+                                .expect("mcu expects Chart::Known; got Chart::Unknown")
+                        ),
                         Style::default().fg(Color::Yellow),
                     ),
                     Span::styled(
@@ -230,7 +251,6 @@ pub(super) fn draw_dashinfo_overlay(
             },
         );
     }
-
 }
 
 /// Searchable dashboard picker. Renders as a centred modal with:
@@ -249,17 +269,8 @@ pub(super) fn draw_dashboards_picker(f: &mut Frame, app: &App, screen: Rect) {
     // Modal size: 70% wide, 70% tall, capped.
     let width = (screen.width.saturating_mul(7) / 10).clamp(40, 100);
     let height = (screen.height.saturating_mul(7) / 10).clamp(10, 30);
-    let title = format!(
-        " dashboards · {}/{} ",
-        indices.len(),
-        picker.items.len()
-    );
-    let inner = modal_frame(
-        f,
-        centered_area(screen, width, height),
-        &title,
-        Color::Cyan,
-    );
+    let title = format!(" dashboards · {}/{} ", indices.len(), picker.items.len());
+    let inner = modal_frame(f, centered_area(screen, width, height), &title, Color::Cyan);
     if inner.width == 0 || inner.height < 3 {
         return;
     }
@@ -314,7 +325,7 @@ pub(super) fn draw_dashboards_picker(f: &mut Frame, app: &App, screen: Rect) {
             .take(visible)
             .map(|(filter_idx, item_idx)| {
                 let d = &picker.items[*item_idx];
-                let name = d.name().to_string();
+                let name = d.name_or_unnamed().to_string();
                 let uid = format!("  ({})", d.uid);
                 let desc = d
                     .description()
@@ -394,12 +405,15 @@ pub(super) fn draw_legend_details(f: &mut Frame, app: &App, graph_area: Rect) {
     if series_slice.is_empty() {
         return;
     }
-    let idx = app.legend_selected.min(series_slice.len() - 1);
+    let idx = app.legend.selected.min(series_slice.len() - 1);
     let Some(series) = series_slice.get(idx) else {
         return;
     };
 
-    let mut lines: Vec<Line<'static>> = vec![
+    // Fixed lines that frame the scrollable tag list. Kept as their own
+    // vectors so we can compute width across everything but only scroll
+    // the tag rows.
+    let header_lines: Vec<Line<'static>> = vec![
         Line::from(vec![
             Span::styled(
                 "name: ",
@@ -417,69 +431,85 @@ pub(super) fn draw_legend_details(f: &mut Frame, app: &App, graph_area: Rect) {
                 .add_modifier(Modifier::BOLD),
         )),
     ];
-    if series.tags.is_empty() {
-        lines.push(Line::from(Span::styled(
+    let footer_lines: Vec<Line<'static>> = vec![
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("  points: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                series.points.len().to_string(),
+                Style::default().fg(Color::Gray),
+            ),
+        ]),
+    ];
+
+    // Build the per-tag rows once; we'll slice into a visible window
+    // below once we know the modal's height.
+    let tag_rows: Vec<Line<'static>> = if series.tags.is_empty() {
+        vec![Line::from(Span::styled(
             "  (no tags)",
             Style::default().fg(Color::DarkGray),
-        )));
+        ))]
     } else {
-        for (i, (k, v)) in series.tags.iter().enumerate() {
-            let is_cursor = i == app.details_cursor;
-            let is_picked = app.legend_label_tags.iter().any(|sk| sk == k);
-            let bg = if is_cursor {
-                Some(Color::Rgb(60, 60, 110))
-            } else {
-                None
-            };
-            let with_bg = |mut s: Style| -> Style {
-                if let Some(b) = bg {
-                    s = s.bg(b);
+        series
+            .tags
+            .iter()
+            .enumerate()
+            .map(|(i, (k, v))| {
+                let is_cursor = i == app.legend.details_cursor;
+                let is_picked = app.legend.label_tags.iter().any(|sk| sk == k);
+                let bg = if is_cursor {
+                    Some(Color::Rgb(60, 60, 110))
+                } else {
+                    None
+                };
+                let with_bg = |mut s: Style| -> Style {
+                    if let Some(b) = bg {
+                        s = s.bg(b);
+                    }
+                    s
+                };
+                let mark = if is_picked { "✓" } else { " " };
+                let mark_style = with_bg(
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                );
+                let mut key_style = with_bg(Style::default().fg(Color::Yellow));
+                if is_cursor {
+                    key_style = key_style.add_modifier(Modifier::BOLD);
                 }
-                s
-            };
-            let mark = if is_picked { "✓" } else { " " };
-            let mark_style = with_bg(
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-            );
-            let mut key_style = with_bg(Style::default().fg(Color::Yellow));
-            if is_cursor {
-                key_style = key_style.add_modifier(Modifier::BOLD);
-            }
-            let val_style = with_bg(Style::default().fg(Color::Gray));
-            let pad_style = with_bg(Style::default());
-            lines.push(Line::from(vec![
-                Span::styled(" ".to_string(), pad_style),
-                Span::styled(format!("{mark} "), mark_style),
-                Span::styled(format!("{k:<16}"), key_style),
-                Span::styled("  ".to_string(), pad_style),
-                Span::styled(v.clone(), val_style),
-                Span::styled(" ".to_string(), pad_style),
-            ]));
-        }
-    }
-    lines.push(Line::raw(""));
-    lines.push(Line::from(vec![
-        Span::styled("  points: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            series.points.len().to_string(),
-            Style::default().fg(Color::Gray),
-        ),
-    ]));
+                let val_style = with_bg(Style::default().fg(Color::Gray));
+                let pad_style = with_bg(Style::default());
+                Line::from(vec![
+                    Span::styled(" ".to_string(), pad_style),
+                    Span::styled(format!("{mark} "), mark_style),
+                    Span::styled(format!("{k:<16}"), key_style),
+                    Span::styled("  ".to_string(), pad_style),
+                    Span::styled(crate::chart::tag_text(v), val_style),
+                    Span::styled(" ".to_string(), pad_style),
+                ])
+            })
+            .collect()
+    };
 
-    let body_w = lines
+    // Width is the widest line across everything, clamped to the graph.
+    let line_width =
+        |l: &Line<'_>| -> usize { l.spans.iter().map(|s| s.content.chars().count()).sum() };
+    let body_w = header_lines
         .iter()
-        .map(|l| {
-            l.spans
-                .iter()
-                .map(|s| s.content.chars().count())
-                .sum::<usize>()
-        })
+        .chain(tag_rows.iter())
+        .chain(footer_lines.iter())
+        .map(line_width)
         .max()
         .unwrap_or(0) as u16;
     let width = (body_w.saturating_add(4)).clamp(40, graph_area.width.saturating_sub(2).max(40));
-    let height = (lines.len() as u16 + 2).min(graph_area.height);
+
+    // Decide the modal height: ideally everything fits, but cap to the
+    // graph area minus the two border rows.
+    let total_lines = (header_lines.len() + tag_rows.len() + footer_lines.len()) as u16;
+    let max_inner = graph_area.height.saturating_sub(2);
+    let inner_h = total_lines.min(max_inner);
+    let height = inner_h.saturating_add(2);
     let title = format!(" series details - {}/{} ", idx + 1, series_slice.len());
     let inner = modal_frame(
         f,
@@ -487,5 +517,48 @@ pub(super) fn draw_legend_details(f: &mut Frame, app: &App, graph_area: Rect) {
         &title,
         Color::Cyan,
     );
+
+    // Slice the tag rows to a visible window that keeps the cursor in
+    // view. When the list overflows, the first / last visible row is
+    // replaced with a hint that tells the user how many rows are hidden.
+    let fixed_h = (header_lines.len() + footer_lines.len()) as u16;
+    let tag_capacity = inner.height.saturating_sub(fixed_h) as usize;
+    let visible_rows: Vec<Line<'static>> = if tag_rows.len() <= tag_capacity || tag_capacity == 0 {
+        tag_rows
+    } else {
+        let cursor = app.legend.details_cursor.min(tag_rows.len() - 1);
+        let mut start = cursor
+            .saturating_sub(tag_capacity - 1)
+            .min(tag_rows.len().saturating_sub(tag_capacity));
+        // Keep the cursor visible when it walks back upward too.
+        if cursor < start {
+            start = cursor;
+        }
+        let end = (start + tag_capacity).min(tag_rows.len());
+        let mut window: Vec<Line<'static>> = tag_rows[start..end].to_vec();
+        let hint_style = Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::ITALIC);
+        if start > 0 {
+            window[0] = Line::from(Span::styled(
+                format!("  ↑ {} more above", start),
+                hint_style,
+            ));
+        }
+        if end < tag_rows.len() {
+            let last = window.len() - 1;
+            window[last] = Line::from(Span::styled(
+                format!("  ↓ {} more below", tag_rows.len() - end),
+                hint_style,
+            ));
+        }
+        window
+    };
+
+    let mut lines =
+        Vec::with_capacity(header_lines.len() + visible_rows.len() + footer_lines.len());
+    lines.extend(header_lines);
+    lines.extend(visible_rows);
+    lines.extend(footer_lines);
     f.render_widget(Paragraph::new(lines), inner);
 }

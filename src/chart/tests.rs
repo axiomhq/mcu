@@ -100,7 +100,7 @@ fn ts(name: &str, tags: &[(&str, &str)]) -> Series {
         name: name.to_string(),
         tags: tags
             .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .map(|(k, v)| (k.to_string(), (*v).into()))
             .collect(),
         points: vec![],
         color: Color::Cyan,
@@ -117,18 +117,9 @@ fn summarize_empty_yields_empty() {
 #[test]
 fn summarize_lifts_shared_metric_and_shared_tags() {
     let series = vec![
-        ts(
-            "cpu {h1,us}",
-            &[("host", "h1"), ("region", "us")],
-        ),
-        ts(
-            "cpu {h2,us}",
-            &[("host", "h2"), ("region", "us")],
-        ),
-        ts(
-            "cpu {h3,us}",
-            &[("host", "h3"), ("region", "us")],
-        ),
+        ts("cpu {h1,us}", &[("host", "h1"), ("region", "us")]),
+        ts("cpu {h2,us}", &[("host", "h2"), ("region", "us")]),
+        ts("cpu {h3,us}", &[("host", "h3"), ("region", "us")]),
     ];
     let got = summarize_legend(&series, &[]);
     assert_eq!(got.header, "cpu {region=us}");
@@ -178,10 +169,7 @@ fn summarize_mixed_metric_drops_header_metric() {
 
 #[test]
 fn summarize_single_series_lifts_everything_leaves_empty_rows() {
-    let series = vec![ts(
-        "cpu {h1,us}",
-        &[("host", "h1"), ("region", "us")],
-    )];
+    let series = vec![ts("cpu {h1,us}", &[("host", "h1"), ("region", "us")])];
     let got = summarize_legend(&series, &[]);
     assert_eq!(got.header, "cpu {host=h1, region=us}");
     // Single series: all tags shared, so the row text is empty
@@ -197,8 +185,5 @@ fn summarize_no_shared_tags_keeps_full_per_row() {
     ];
     let got = summarize_legend(&series, &[]);
     assert_eq!(got.header, "cpu");
-    assert_eq!(
-        got.rows,
-        vec!["host=h1".to_string(), "host=h2".to_string()]
-    );
+    assert_eq!(got.rows, vec!["host=h1".to_string(), "host=h2".to_string()]);
 }

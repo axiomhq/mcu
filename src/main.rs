@@ -20,9 +20,11 @@ mod viz;
 
 use std::collections::BTreeMap;
 use std::io;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
+use clap::Parser;
 use crossterm::{
     event::{self, Event},
     execute,
@@ -33,14 +35,13 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use crate::app::App;
 
 fn main() -> Result<()> {
-    let cli = match parse_cli_args() {
-        Ok(cli) => cli,
-        Err(e) => {
-            eprintln!("metrics-tui: {e}");
-            print_usage(&mut io::stderr());
-            std::process::exit(2);
-        }
-    };
+    // `parse()` writes help / errors to the right stream and exits
+    // with the conventional codes (0 for `--help`/`--version`,
+    // 2 for usage errors), so we don't need a manual `try_parse` ladder.
+    let mut cli = CliArgs::parse();
+    cli.build_params();
+
+    install_panic_hook();
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -61,75 +62,79 @@ fn main() -> Result<()> {
     result
 }
 
+/// Install a panic hook that restores the terminal before printing the
+/// `color-eyre` panic report. Without the restore step, a panic mid-frame
+/// leaves the terminal in raw mode with the alt-screen active — the user
+/// sees nothing and has to blindly type `reset`.
+fn install_panic_hook() {
+    use color_eyre::config::HookBuilder;
+    let (panic_hook, eyre_hook) = HookBuilder::default().into_hooks();
+    // Install eyre's report handler so any future `eyre::Report` get the
+    // pretty rendering too. We can't return its error from main without
+    // changing the result type, so swallow the install error — it only
+    // ever fires when called twice, which we never do.
+    let _ = eyre_hook.install();
+    let panic_hook = panic_hook.into_panic_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // Best-effort terminal restore. Errors here are swallowed because
+        // we're already on the unwinding path — there's nowhere useful
+        // for them to go.
+        let _ = disable_raw_mode();
+        let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        panic_hook(info);
+    }));
+}
+
 /// Parsed command-line arguments.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Parser)]
+#[command(
+    name = "mcu",
+    version,
+    about = "Vim-style TUI editor and dashboard for the Axiom metrics service.",
+    long_about = "FILE.mpl is opened on startup. It will be created on `:w` if missing.\n\
+                  Use -d/--dashboard to load a dashboard by uid on startup."
+)]
 pub struct CliArgs {
-    pub file: Option<std::path::PathBuf>,
-    /// User-supplied values for MPL `param $name: type;` declarations.
-    /// Sent with each query so the server can resolve them.
-    pub params: BTreeMap<String, String>,
-    /// Optional dashboard uid to fetch on startup (equivalent to `:open <uid>`).
+    /// MPL file to open on startup. Created on `:w` if missing.
+    pub file: Option<PathBuf>,
+
+    /// Provide a value for an MPL `param NAME: type;` declaration.
+    /// May be repeated. `$NAME=value` and `NAME=value` are both accepted;
+    /// values may contain `=`.
+    #[arg(
+        short = 'p', long = "param",
+        value_name = "NAME=VALUE",
+        value_parser = parse_param,
+    )]
+    pub params_kv: Vec<(String, String)>,
+
+    /// Fetch and load a dashboard by uid on startup (equivalent to `:open <uid>`).
+    #[arg(
+        short = 'd', long = "dashboard",
+        value_name = "UID",
+        value_parser = parse_dashboard_uid,
+    )]
     pub dashboard: Option<String>,
+
+    /// Holds the assembled `params_kv` as a `BTreeMap` for the rest of
+    /// the codebase. Populated by [`CliArgs::params`].
+    #[arg(skip)]
+    pub params: BTreeMap<String, String>,
 }
 
-fn parse_cli_args() -> std::result::Result<CliArgs, String> {
-    let mut args = std::env::args().skip(1).peekable();
-    let mut cli = CliArgs::default();
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "-h" | "--help" => {
-                print_usage(&mut io::stdout());
-                std::process::exit(0);
-            }
-            "-p" | "--param" => {
-                let pair = args
-                    .next()
-                    .ok_or_else(|| format!("missing argument to {arg}"))?;
-                insert_param(&mut cli.params, &pair)?;
-            }
-            s if s.starts_with("-p=") => insert_param(&mut cli.params, &s[3..])?,
-            s if s.starts_with("--param=") => insert_param(&mut cli.params, &s[8..])?,
-            "-d" | "--dashboard" => {
-                let uid = args
-                    .next()
-                    .ok_or_else(|| format!("missing argument to {arg}"))?;
-                set_dashboard(&mut cli.dashboard, uid)?;
-            }
-            s if s.starts_with("-d=") => set_dashboard(&mut cli.dashboard, s[3..].to_string())?,
-            s if s.starts_with("--dashboard=") => {
-                set_dashboard(&mut cli.dashboard, s[12..].to_string())?
-            }
-            s if s.starts_with('-') => {
-                return Err(format!("unknown flag: {s}"));
-            }
-            _ if cli.file.is_none() => {
-                cli.file = Some(std::path::PathBuf::from(arg));
-            }
-            _ => return Err(format!("unexpected positional argument: {arg}")),
-        }
+impl CliArgs {
+    /// Build a fresh [`BTreeMap`] from the accumulated `-p` flags.
+    /// Later flags override earlier ones — matches the historical
+    /// behaviour of the hand-rolled parser.
+    pub fn build_params(&mut self) {
+        self.params = self.params_kv.iter().cloned().collect();
     }
-    Ok(cli)
 }
 
-fn set_dashboard(
-    slot: &mut Option<String>,
-    uid: String,
-) -> std::result::Result<(), String> {
-    let trimmed = uid.trim().to_string();
-    if trimmed.is_empty() {
-        return Err("empty dashboard uid".to_string());
-    }
-    if slot.is_some() {
-        return Err("--dashboard specified more than once".to_string());
-    }
-    *slot = Some(trimmed);
-    Ok(())
-}
-
-fn insert_param(
-    params: &mut BTreeMap<String, String>,
-    raw: &str,
-) -> std::result::Result<(), String> {
+/// Parse a single `NAME=VALUE` (or `$NAME=VALUE`) pair. Returns the
+/// canonical bare name (matching the MPL engine's `param.name`, which
+/// excludes the leading `$`).
+fn parse_param(raw: &str) -> std::result::Result<(String, String), String> {
     let (k, v) = raw
         .split_once('=')
         .ok_or_else(|| format!("expected NAME=VALUE, got `{raw}`"))?;
@@ -137,25 +142,17 @@ fn insert_param(
     if k.is_empty() {
         return Err(format!("empty parameter name in `{raw}`"));
     }
-    // Accept both `$foo` and `foo`; canonicalize to bare names so they
-    // match the engine's `param.name` (which excludes the leading `$`).
     let name = k.strip_prefix('$').unwrap_or(k).to_string();
-    params.insert(name, v.to_string());
-    Ok(())
+    Ok((name, v.to_string()))
 }
 
-fn print_usage(out: &mut impl io::Write) {
-    let _ = writeln!(
-        out,
-        "usage: metrics-tui [-p NAME=VALUE]... [-d UID] [FILE.mpl]\n\
-         \n\
-         Options:\n  \
-           -p, --param NAME=VALUE   provide a value for an MPL `param` declaration.\n  \
-           -d, --dashboard UID      fetch and load a dashboard on startup.\n  \
-           -h, --help               show this message.\n\
-         \n\
-         FILE.mpl is opened on startup. It will be created on `:w` if missing."
-    );
+/// Validate a dashboard uid — must be non-empty after trimming.
+fn parse_dashboard_uid(raw: &str) -> std::result::Result<String, String> {
+    let trimmed = raw.trim().to_string();
+    if trimmed.is_empty() {
+        return Err("empty dashboard uid".to_string());
+    }
+    Ok(trimmed)
 }
 
 fn run(
@@ -164,7 +161,7 @@ fn run(
     cli: CliArgs,
 ) -> Result<()> {
     let mut app = App::new(runtime);
-    app.cli_params = cli.params;
+    app.params.cli = cli.params;
     // CLI file argument takes precedence over the session cache. When the file
     // does not exist yet, we still set it as the current file so `:w` creates it.
     if let Some(path) = cli.file {
@@ -212,42 +209,15 @@ fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
 
+    /// Run the real production parser against an argv slice (clap
+    /// expects argv[0] to be the program name).
     fn parse(args: &[&str]) -> std::result::Result<CliArgs, String> {
-        // Re-implement the body of `parse_cli_args` but read from a slice
-        // instead of `std::env::args`. Keeps the test hermetic.
-        let mut iter = args.iter().copied().peekable();
-        let mut cli = CliArgs::default();
-        while let Some(arg) = iter.next() {
-            match arg {
-                "-h" | "--help" => return Err("help".to_string()),
-                "-p" | "--param" => {
-                    let pair = iter
-                        .next()
-                        .ok_or_else(|| format!("missing argument to {arg}"))?;
-                    insert_param(&mut cli.params, pair)?;
-                }
-                s if s.starts_with("-p=") => insert_param(&mut cli.params, &s[3..])?,
-                s if s.starts_with("--param=") => insert_param(&mut cli.params, &s[8..])?,
-                "-d" | "--dashboard" => {
-                    let uid = iter
-                        .next()
-                        .ok_or_else(|| format!("missing argument to {arg}"))?;
-                    set_dashboard(&mut cli.dashboard, uid.to_string())?;
-                }
-                s if s.starts_with("-d=") => {
-                    set_dashboard(&mut cli.dashboard, s[3..].to_string())?
-                }
-                s if s.starts_with("--dashboard=") => {
-                    set_dashboard(&mut cli.dashboard, s[12..].to_string())?
-                }
-                s if s.starts_with('-') => return Err(format!("unknown flag: {s}")),
-                _ if cli.file.is_none() => {
-                    cli.file = Some(std::path::PathBuf::from(arg));
-                }
-                _ => return Err(format!("unexpected positional: {arg}")),
-            }
-        }
+        let mut argv = vec!["mcu"];
+        argv.extend_from_slice(args);
+        let mut cli = CliArgs::try_parse_from(argv).map_err(|e| e.to_string())?;
+        cli.build_params();
         Ok(cli)
     }
 
@@ -316,14 +286,22 @@ mod tests {
 
     #[test]
     fn unknown_flag_errors() {
-        let err = parse(&["--frobnicate"]).unwrap_err();
-        assert!(err.contains("unknown flag"));
+        // clap surfaces its own wording for unknown args; match the
+        // canonical substring rather than the historical phrasing.
+        let err = parse(&["--frobnicate"]).unwrap_err().to_lowercase();
+        assert!(
+            err.contains("unexpected") || err.contains("unknown"),
+            "got {err}"
+        );
     }
 
     #[test]
     fn second_positional_errors() {
-        let err = parse(&["a.mpl", "b.mpl"]).unwrap_err();
-        assert!(err.contains("unexpected positional"));
+        let err = parse(&["a.mpl", "b.mpl"]).unwrap_err().to_lowercase();
+        assert!(
+            err.contains("unexpected") || err.contains("argument"),
+            "got {err}"
+        );
     }
 
     #[test]
@@ -336,8 +314,11 @@ mod tests {
 
     #[test]
     fn dashboard_flag_missing_value_errors() {
-        let err = parse(&["-d"]).unwrap_err();
-        assert!(err.contains("missing argument"), "got {err}");
+        let err = parse(&["-d"]).unwrap_err().to_lowercase();
+        assert!(
+            err.contains("requires") || err.contains("missing") || err.contains("value"),
+            "got {err}"
+        );
     }
 
     #[test]
@@ -348,7 +329,15 @@ mod tests {
 
     #[test]
     fn dashboard_flag_duplicated_errors() {
-        let err = parse(&["-d", "one", "--dashboard", "two"]).unwrap_err();
-        assert!(err.contains("more than once"), "got {err}");
+        // clap rejects a second occurrence of a single-value option;
+        // the exact wording is its `the argument ... cannot be used
+        // multiple times` text.
+        let err = parse(&["-d", "one", "--dashboard", "two"])
+            .unwrap_err()
+            .to_lowercase();
+        assert!(
+            err.contains("multiple times") || err.contains("more than once"),
+            "got {err}"
+        );
     }
 }

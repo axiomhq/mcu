@@ -1,4 +1,5 @@
 use super::*;
+use crate::axiom::DashboardSummaryExt;
 
 fn ds(name: &str, edge: Option<&str>) -> DatasetSummary {
     DatasetSummary {
@@ -140,11 +141,7 @@ fn query_round_trips_through_disk() {
 }
 
 fn tempdir() -> PathBuf {
-    let base = std::env::temp_dir().join(format!(
-        "metrics-tui-test-{}-{}",
-        std::process::id(),
-        unix_now()
-    ));
+    let base = std::env::temp_dir().join(format!("mcu-test-{}-{}", std::process::id(), unix_now()));
     std::fs::create_dir_all(&base).unwrap();
     base
 }
@@ -171,7 +168,7 @@ fn dashboard_list_round_trips() {
     let items = cache.cached_dashboards().expect("cached list");
     assert_eq!(items.len(), 2);
     assert_eq!(items[0].uid, "a");
-    assert_eq!(items[1].name(), "Beta");
+    assert_eq!(items[1].name_or_unnamed(), "Beta");
 }
 
 #[test]

@@ -1,10 +1,10 @@
 use super::*;
 
 use super::agg::{Agg, format_value};
-use super::pragma::format_pragma;
 use super::heatmap::{heatmap_bin, normalize, viridis_rgb};
 use super::note::{render_markdown, strip_leading_pragma};
 use super::pie::pie_rows;
+use super::pragma::format_pragma;
 use super::table::{TableCell, series_to_table};
 use super::top_list::top_list_rows;
 use ratatui::style::{Color, Style};
@@ -272,7 +272,7 @@ fn pie_rows_drops_negative_aggregates() {
 fn tagged(name: &str, tag: &str, ys: &[f64]) -> Series {
     Series {
         name: name.to_string(),
-        tags: vec![("room".to_string(), tag.to_string())],
+        tags: vec![("room".to_string(), tag.into())],
         points: pts(ys),
         color: Color::Cyan,
     }

@@ -1,5 +1,5 @@
 [package]
-name = "metrics-tui"
+name = "mcu"
 version = "0.1.0"
 edition = "2024"
 
@@ -13,12 +13,15 @@ serde = { version = "1.0.228", features = ["derive"] }
 toml = "1.1.2"
 reqwest = { version = "0.13.3", default-features = false, features = ["json", "rustls"] }
 serde_json = "1.0.149"
+axiom-rs = { version = "0.11.5", default-features = false, features = ["tokio", "rustls-tls"] }
+chrono = { version = "0.4", default-features = false, features = ["serde", "std"] }
+clap = { version = "4", features = ["derive", "wrap_help"] }
+etcetera = "0.11"
+color-eyre = { version = "0.6", default-features = false, features = ["track-caller"] }
 mpl-lang = { version = "0.5.3", default-features = false, path = "../mpl" }
 pest = "2.8.6"
 mpl-language-server = { version = "0.5.3", path = "../mpl/extra/mpl-language-server" }
 miette = "7.6.0"
 time = { version = "0.3", features = ["formatting", "macros", "parsing"] }
 nucleo-matcher = "0.3"
-
-[dev-dependencies]
-tempfile = "3.27.0"
+tempfile = "3.27"

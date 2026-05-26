@@ -42,43 +42,15 @@ pub struct CompletionRequest {
 /// completion preserves this order for deterministic first-Tab
 /// results.
 const HEAD_COMMANDS: &[&str] = &[
-    "axiom",
-    "dash",
-    "dashinfo",
-    "datasets",
-    "di",
-    "ds",
-    "e",
-    "edit",
-    "grid",
-    "h",
-    "help",
-    "m",
-    "metrics",
-    "open",
-    "p",
-    "param",
-    "q",
-    "quit",
-    "r",
-    "refresh",
-    "run",
-    "solo",
-    "tile",
-    "time",
-    "trace",
-    "viz",
-    "w",
-    "wq",
-    "write",
-    "x",
+    "axiom", "dash", "dashinfo", "datasets", "di", "ds", "e", "edit", "grid", "h", "help", "m",
+    "metrics", "open", "p", "param", "q", "quit", "r", "refresh", "run", "solo", "tile", "time",
+    "trace", "viz", "w", "wq", "write", "x",
 ];
 
-/// Sub-commands for `:dash`.
-const DASH_SUBS: &[&str] = &["ls", "new", "rm", "save"];
-
-/// Sub-commands for `:tile`.
-const TILE_SUBS: &[&str] = &["add", "inspect", "json", "mv", "rm", "size", "title"];
+// The canonical `:dash` and `:tile` sub-command lists live next to the
+// dispatch tables in `src/app/ex_cmds.rs`; importing them here keeps the
+// completion menu in lock-step with the actual command surface.
+use crate::app::ex_cmds::{DASH_SUBS, TILE_SUBS};
 
 /// Compute completions for the cmdline at the given char-cursor
 /// (mirrors `CmdLine.cursor` which counts chars, not bytes). Returns
@@ -154,25 +126,7 @@ pub fn completions_for(
 }
 
 fn viz_kind_names() -> Vec<&'static str> {
-    use VizKind::*;
-    [
-        Line,
-        Bar,
-        Area,
-        Scatter,
-        Statistic,
-        TopList,
-        Pie,
-        Heatmap,
-        Table,
-        LogStream,
-        MonitorList,
-        Note,
-        Spacer,
-    ]
-    .into_iter()
-    .map(|k| k.as_str())
-    .collect()
+    VizKind::ALL.iter().map(|k| k.as_str()).collect()
 }
 
 /// Filter `candidates` by `token` using nucleo's fuzzy scorer. Empty

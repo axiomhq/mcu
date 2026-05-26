@@ -71,7 +71,7 @@ single-concern at their current size and don't need restructuring.
 ### 2.1 `src/app.rs` — god-module (5747 code LOC)
 
 `App` has **~45 fields** and **~190 methods**; the impl block runs
-[L820–L4973](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L820-L4973).
+[L820–L4973](file:///Users/heinzgies/Projects/mcu/src/app.rs#L820-L4973).
 Natural seams (one module each):
 
 ```
@@ -93,12 +93,12 @@ util.rs              referenced_tags, cursor offsets, etc.   ~250
 ```
 
 Top-level mechanical wins (no behaviour change):
-- The **`handle_event` `match`** at [L4439–L4670](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L4439-L4670)
+- The **`handle_event` `match`** at [L4439–L4670](file:///Users/heinzgies/Projects/mcu/src/app.rs#L4439-L4670)
   is ~230 lines across 13 variants. Each arm becomes its own free fn
   (`on_datasets_fetched`, `on_metrics_fetched`, ...).
 - The **`execute_command` `match`** dispatches by string head; split per
   command family (file / dashboard / tile / time / viz).
-- `cmd_tile` ([L3490–L3640](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L3490-L3640)) is one ~150-line nested match
+- `cmd_tile` ([L3490–L3640](file:///Users/heinzgies/Projects/mcu/src/app.rs#L3490-L3640)) is one ~150-line nested match
   for `add` / `rm` / `mv` / `size` / `title` / `json`. One sub-fn per
   arm collapses cleanly.
 
@@ -111,13 +111,13 @@ just `pub(crate)` and `mod`.
 
 | concern | functions | LOC |
 |---|---|---:|
-| **top-level layout** | `capped`, `draw` ([L28-L218](file:///Users/heinzgies/Projects/metrics-tui/src/ui.rs#L28-L218)), `pane_block` | ~200 |
-| **dashboard grid** | `draw_dashboard_grid`, `compute_row_heights`, `resolve_slot`, `draw_grid_tile`, `draw_inline_legend`, `fit_inline_legend` ([L234-L838](file:///Users/heinzgies/Projects/metrics-tui/src/ui.rs#L234-L838)) | ~600 |
-| **overlays / modals / pickers** | 13 fns: confirm-delete, tile-inspect, time picker (3), add-pick, dashinfo, dashboards picker, error, legend details, hover popup, help modal, cmdline completion popup, completion popup, quickfix popup ([L842-L2545](file:///Users/heinzgies/Projects/metrics-tui/src/ui.rs#L842-L2545)) | ~1100 |
-| **editor pane** | `draw_editor`, `editor_title`, `diagnostic_count_suffix` ([L2056-L2178](file:///Users/heinzgies/Projects/metrics-tui/src/ui.rs#L2056-L2178)) | ~120 |
-| **params pane** | `draw_params` ([L1506-L1610](file:///Users/heinzgies/Projects/metrics-tui/src/ui.rs#L1506-L1610)) | ~100 |
-| **status bar + cmdline** | `draw_status`, `diagnostic_status_or_default`, `diagnostic_count_summary`, `draw_command_line` ([L2179-L2356](file:///Users/heinzgies/Projects/metrics-tui/src/ui.rs#L2179-L2356)) | ~180 |
-| **help parser** | `render_keys_help` ([L1928-L1989](file:///Users/heinzgies/Projects/metrics-tui/src/ui.rs#L1928-L1989)) | ~60 |
+| **top-level layout** | `capped`, `draw` ([L28-L218](file:///Users/heinzgies/Projects/mcu/src/ui.rs#L28-L218)), `pane_block` | ~200 |
+| **dashboard grid** | `draw_dashboard_grid`, `compute_row_heights`, `resolve_slot`, `draw_grid_tile`, `draw_inline_legend`, `fit_inline_legend` ([L234-L838](file:///Users/heinzgies/Projects/mcu/src/ui.rs#L234-L838)) | ~600 |
+| **overlays / modals / pickers** | 13 fns: confirm-delete, tile-inspect, time picker (3), add-pick, dashinfo, dashboards picker, error, legend details, hover popup, help modal, cmdline completion popup, completion popup, quickfix popup ([L842-L2545](file:///Users/heinzgies/Projects/mcu/src/ui.rs#L842-L2545)) | ~1100 |
+| **editor pane** | `draw_editor`, `editor_title`, `diagnostic_count_suffix` ([L2056-L2178](file:///Users/heinzgies/Projects/mcu/src/ui.rs#L2056-L2178)) | ~120 |
+| **params pane** | `draw_params` ([L1506-L1610](file:///Users/heinzgies/Projects/mcu/src/ui.rs#L1506-L1610)) | ~100 |
+| **status bar + cmdline** | `draw_status`, `diagnostic_status_or_default`, `diagnostic_count_summary`, `draw_command_line` ([L2179-L2356](file:///Users/heinzgies/Projects/mcu/src/ui.rs#L2179-L2356)) | ~180 |
+| **help parser** | `render_keys_help` ([L1928-L1989](file:///Users/heinzgies/Projects/mcu/src/ui.rs#L1928-L1989)) | ~60 |
 | **generic helpers** | `wrap_message` | ~40 |
 
 Proposed split:
@@ -177,8 +177,8 @@ against its own `Series` fixture.
 
 The surprising mix here is **MPL parsing in the HTTP client module**:
 
-- [`extract_dataset_metric`](file:///Users/heinzgies/Projects/metrics-tui/src/axiom.rs#L792-L840), [`extract_dataset`](file:///Users/heinzgies/Projects/metrics-tui/src/axiom.rs#L758-L765),
-  [`skip_leading_comments_and_ws`](file:///Users/heinzgies/Projects/metrics-tui/src/axiom.rs#L766-L791)
+- [`extract_dataset_metric`](file:///Users/heinzgies/Projects/mcu/src/axiom.rs#L792-L840), [`extract_dataset`](file:///Users/heinzgies/Projects/mcu/src/axiom.rs#L758-L765),
+  [`skip_leading_comments_and_ws`](file:///Users/heinzgies/Projects/mcu/src/axiom.rs#L766-L791)
   are MPL source-text parsers. They have nothing to do with Axiom's HTTP
   API — they exist because the dataset/metric names get sniffed out of
   the editor buffer before any request is built. They belong in
@@ -244,18 +244,18 @@ self.runtime.spawn(async move {
 });
 ```
 
-Call sites: [`fetch_datasets`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L2321-L2349),
-[`fetch_metrics_for_current_query`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L2351-L2406),
-[`fetch_tags`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L2407-L2449),
-[`fetch_tag_values`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L2451-L2501),
-[`run_query`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L2598-L2660),
-[`run_tile_queries`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L3441-L3540),
-[`run_focused_tile_query`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L1181-L1240),
-[`fetch_dashboard_by_uid`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L3921-L4010),
-[`cmd_dash_new`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L4011-L4080),
-[`cmd_dash_save`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L4081-L4180),
-[`cmd_dash_rm`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L4181-L4230),
-[`cmd_dashboards`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L4231-L4280).
+Call sites: [`fetch_datasets`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L2321-L2349),
+[`fetch_metrics_for_current_query`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L2351-L2406),
+[`fetch_tags`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L2407-L2449),
+[`fetch_tag_values`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L2451-L2501),
+[`run_query`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L2598-L2660),
+[`run_tile_queries`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L3441-L3540),
+[`run_focused_tile_query`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L1181-L1240),
+[`fetch_dashboard_by_uid`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L3921-L4010),
+[`cmd_dash_new`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L4011-L4080),
+[`cmd_dash_save`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L4081-L4180),
+[`cmd_dash_rm`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L4181-L4230),
+[`cmd_dashboards`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L4231-L4280).
 
 One helper:
 
@@ -271,14 +271,14 @@ where F: FnOnce(AxiomClient, Sender<AppEvent>, Arc<RwLock<Cache>>) -> Fut,
 
 Six near-identical `GET → check status → from_str` bodies:
 
-- [`list_datasets`](file:///Users/heinzgies/Projects/metrics-tui/src/axiom.rs#L348-L368)
-- [`get_dashboard`](file:///Users/heinzgies/Projects/metrics-tui/src/axiom.rs#L461-L487)
-- [`list_dashboards`](file:///Users/heinzgies/Projects/metrics-tui/src/axiom.rs#L496-L517)
-- [`list_metrics`](file:///Users/heinzgies/Projects/metrics-tui/src/axiom.rs#L524-L556)
-- [`list_metric_tags`](file:///Users/heinzgies/Projects/metrics-tui/src/axiom.rs#L562-L596)
-- [`list_metric_tag_values`](file:///Users/heinzgies/Projects/metrics-tui/src/axiom.rs#L601-L636)
+- [`list_datasets`](file:///Users/heinzgies/Projects/mcu/src/axiom.rs#L348-L368)
+- [`get_dashboard`](file:///Users/heinzgies/Projects/mcu/src/axiom.rs#L461-L487)
+- [`list_dashboards`](file:///Users/heinzgies/Projects/mcu/src/axiom.rs#L496-L517)
+- [`list_metrics`](file:///Users/heinzgies/Projects/mcu/src/axiom.rs#L524-L556)
+- [`list_metric_tags`](file:///Users/heinzgies/Projects/mcu/src/axiom.rs#L562-L596)
+- [`list_metric_tag_values`](file:///Users/heinzgies/Projects/mcu/src/axiom.rs#L601-L636)
 
-A twin of [`send_upsert`](file:///Users/heinzgies/Projects/metrics-tui/src/axiom.rs#L432-L482) —
+A twin of [`send_upsert`](file:///Users/heinzgies/Projects/mcu/src/axiom.rs#L432-L482) —
 `async fn get_json<T: DeserializeOwned>(&self, url, label) -> Result<T>` —
 collapses ~120 LOC to ~30.
 
@@ -286,11 +286,11 @@ collapses ~120 LOC to ~30.
 
 Same `entry().or_default().insert(key, CachedX { fetched_at: unix_now(), ... })`
 shape repeats in
-[`replace_tags`](file:///Users/heinzgies/Projects/metrics-tui/src/cache.rs#L174-L188),
-[`replace_tag_values`](file:///Users/heinzgies/Projects/metrics-tui/src/cache.rs#L213-L235),
-[`replace_metrics`](file:///Users/heinzgies/Projects/metrics-tui/src/cache.rs#L415-L423),
-[`replace_dashboard`](file:///Users/heinzgies/Projects/metrics-tui/src/cache.rs#L274-L283),
-[`replace_dashboards`](file:///Users/heinzgies/Projects/metrics-tui/src/cache.rs#L259-L264).
+[`replace_tags`](file:///Users/heinzgies/Projects/mcu/src/cache.rs#L174-L188),
+[`replace_tag_values`](file:///Users/heinzgies/Projects/mcu/src/cache.rs#L213-L235),
+[`replace_metrics`](file:///Users/heinzgies/Projects/mcu/src/cache.rs#L415-L423),
+[`replace_dashboard`](file:///Users/heinzgies/Projects/mcu/src/cache.rs#L274-L283),
+[`replace_dashboards`](file:///Users/heinzgies/Projects/mcu/src/cache.rs#L259-L264).
 Mirror `has_*` accessors do the same lookup negative. A generic
 `Cached<T> { fetched_at, data: T }` plus one `upsert`/`hit` pair
 would consolidate.
@@ -312,20 +312,20 @@ f.render_widget(Paragraph::new(...), inner) // or List, or rows
 
 Same skeleton, ~15 copies:
 
-- [`draw_confirm_delete_overlay`](file:///Users/heinzgies/Projects/metrics-tui/src/ui.rs#L847-L891)
-- [`draw_tile_inspect_overlay`](file:///Users/heinzgies/Projects/metrics-tui/src/ui.rs#L898-L922)
-- [`draw_time_preset_overlay`](file:///Users/heinzgies/Projects/metrics-tui/src/ui.rs#L942-L1019)
-- [`draw_time_custom_overlay`](file:///Users/heinzgies/Projects/metrics-tui/src/ui.rs#L1021-L1110)
-- [`draw_add_pick_overlay`](file:///Users/heinzgies/Projects/metrics-tui/src/ui.rs#L1140-L1175)
-- [`draw_dashinfo_overlay`](file:///Users/heinzgies/Projects/metrics-tui/src/ui.rs#L1180-L1325)
-- [`draw_dashboards_picker`](file:///Users/heinzgies/Projects/metrics-tui/src/ui.rs#L1335-L1463)
-- [`draw_error_overlay`](file:///Users/heinzgies/Projects/metrics-tui/src/ui.rs#L1465-L1497)
-- [`draw_legend_details`](file:///Users/heinzgies/Projects/metrics-tui/src/ui.rs#L1607-L1727)
-- [`draw_hover_popup`](file:///Users/heinzgies/Projects/metrics-tui/src/ui.rs#L1759-L1840)
-- [`draw_help_modal`](file:///Users/heinzgies/Projects/metrics-tui/src/ui.rs#L1846-L1898)
-- [`draw_cmdline_completion_popup`](file:///Users/heinzgies/Projects/metrics-tui/src/ui.rs#L2030-L2065)
-- [`draw_completion_popup`](file:///Users/heinzgies/Projects/metrics-tui/src/ui.rs#L2068-L2126)
-- [`draw_quickfix_popup`](file:///Users/heinzgies/Projects/metrics-tui/src/ui.rs#L2140-L2196)
+- [`draw_confirm_delete_overlay`](file:///Users/heinzgies/Projects/mcu/src/ui.rs#L847-L891)
+- [`draw_tile_inspect_overlay`](file:///Users/heinzgies/Projects/mcu/src/ui.rs#L898-L922)
+- [`draw_time_preset_overlay`](file:///Users/heinzgies/Projects/mcu/src/ui.rs#L942-L1019)
+- [`draw_time_custom_overlay`](file:///Users/heinzgies/Projects/mcu/src/ui.rs#L1021-L1110)
+- [`draw_add_pick_overlay`](file:///Users/heinzgies/Projects/mcu/src/ui.rs#L1140-L1175)
+- [`draw_dashinfo_overlay`](file:///Users/heinzgies/Projects/mcu/src/ui.rs#L1180-L1325)
+- [`draw_dashboards_picker`](file:///Users/heinzgies/Projects/mcu/src/ui.rs#L1335-L1463)
+- [`draw_error_overlay`](file:///Users/heinzgies/Projects/mcu/src/ui.rs#L1465-L1497)
+- [`draw_legend_details`](file:///Users/heinzgies/Projects/mcu/src/ui.rs#L1607-L1727)
+- [`draw_hover_popup`](file:///Users/heinzgies/Projects/mcu/src/ui.rs#L1759-L1840)
+- [`draw_help_modal`](file:///Users/heinzgies/Projects/mcu/src/ui.rs#L1846-L1898)
+- [`draw_cmdline_completion_popup`](file:///Users/heinzgies/Projects/mcu/src/ui.rs#L2030-L2065)
+- [`draw_completion_popup`](file:///Users/heinzgies/Projects/mcu/src/ui.rs#L2068-L2126)
+- [`draw_quickfix_popup`](file:///Users/heinzgies/Projects/mcu/src/ui.rs#L2140-L2196)
 
 `draw_completion_popup` + `draw_quickfix_popup` are near-clones (anchor-at-
 cursor + list). `draw_dashboards_picker` + `draw_time_preset_overlay` +
@@ -347,15 +347,15 @@ Realistic shrink: **~400 LOC out of ui.rs**.
 
 Every `handle_*_key` repeats `match (code, mods)` with hjkl/arrows + Esc +
 Enter + `g`/`G`. Affected:
-[`handle_move_key`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L1276-L1310),
-[`handle_resize_key`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L1311-L1340),
-[`handle_add_pick_key`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L1382-L1420),
-[`handle_params_key`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L1535-L1580),
-[`handle_legend_key`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L1620-L1670),
-[`handle_legend_details_key`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L1680-L1715),
-[`handle_help_key`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L2615-L2648),
-[`handle_time_preset_key`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L3155-L3205),
-[`handle_dashboards_picker_key`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L4181-L4218).
+[`handle_move_key`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L1276-L1310),
+[`handle_resize_key`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L1311-L1340),
+[`handle_add_pick_key`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L1382-L1420),
+[`handle_params_key`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L1535-L1580),
+[`handle_legend_key`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L1620-L1670),
+[`handle_legend_details_key`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L1680-L1715),
+[`handle_help_key`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L2615-L2648),
+[`handle_time_preset_key`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L3155-L3205),
+[`handle_dashboards_picker_key`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L4181-L4218).
 
 A `CursorNav { len, selected }` helper that takes a `KeyEvent` and yields
 `Move(delta) | Accept | Cancel | Other(k)` removes the duplicated arms.
@@ -368,12 +368,12 @@ Twelve `#[allow(dead_code)]` annotations in one file. Most of the internal
 `Tile`/`Dashboard`/`Layout`/`GridPos` model is never read — the renderer
 walks `axiom::Chart` directly off `loaded_dashboard`.
 
-- [`Tile::id`/`title`/`time_override`/`pos`](file:///Users/heinzgies/Projects/metrics-tui/src/dashboard.rs#L195-L206)
-- [`Dashboard::id`/`name`/`time_range`/`variables`/`layout`](file:///Users/heinzgies/Projects/metrics-tui/src/dashboard.rs#L346-L356)
-- [`GridPos`](file:///Users/heinzgies/Projects/metrics-tui/src/dashboard.rs#L167-L177) — populated, never read.
-- [`Layout`](file:///Users/heinzgies/Projects/metrics-tui/src/dashboard.rs#L178-L194) — default-constructed, never consumed.
-- [`Query::Apl`/`Note`/`Empty`](file:///Users/heinzgies/Projects/metrics-tui/src/dashboard.rs#L141-L166) — only `Mpl` is exercised; `Apl`/`Note` are placeholders.
-- [`Query::text`](file:///Users/heinzgies/Projects/metrics-tui/src/dashboard.rs#L153-L165) — `#[allow(dead_code)]`.
+- [`Tile::id`/`title`/`time_override`/`pos`](file:///Users/heinzgies/Projects/mcu/src/dashboard.rs#L195-L206)
+- [`Dashboard::id`/`name`/`time_range`/`variables`/`layout`](file:///Users/heinzgies/Projects/mcu/src/dashboard.rs#L346-L356)
+- [`GridPos`](file:///Users/heinzgies/Projects/mcu/src/dashboard.rs#L167-L177) — populated, never read.
+- [`Layout`](file:///Users/heinzgies/Projects/mcu/src/dashboard.rs#L178-L194) — default-constructed, never consumed.
+- [`Query::Apl`/`Note`/`Empty`](file:///Users/heinzgies/Projects/mcu/src/dashboard.rs#L141-L166) — only `Mpl` is exercised; `Apl`/`Note` are placeholders.
+- [`Query::text`](file:///Users/heinzgies/Projects/mcu/src/dashboard.rs#L153-L165) — `#[allow(dead_code)]`.
 
 Pragmatic shape: keep `VizKind` (it has variants the wire `Chart` enum
 lacks) and `extract_query`; drop the rest. The `Dashboard`/`Tile` model
@@ -381,24 +381,24 @@ adds ~80 lines of indirection for zero runtime benefit today.
 
 ### 4.2 `src/axiom.rs`
 
-- [`Client::create_dashboard`](file:///Users/heinzgies/Projects/metrics-tui/src/axiom.rs#L373-L394)
+- [`Client::create_dashboard`](file:///Users/heinzgies/Projects/mcu/src/axiom.rs#L373-L394)
   is `#[allow(dead_code)]`. Currently `cmd_dash_save` always uses PUT
   (upsert), so create is unused. Either wire it (proper "new" path) or
   delete.
 - Five "audit field" `#[allow(dead_code)]` annotations across
-  [`DashboardSummary`](file:///Users/heinzgies/Projects/metrics-tui/src/axiom.rs#L39-L66),
-  [`DashboardWriteResponse`](file:///Users/heinzgies/Projects/metrics-tui/src/axiom.rs#L87-L97),
-  [`DashboardError`](file:///Users/heinzgies/Projects/metrics-tui/src/axiom.rs#L106-L116) — fine
+  [`DashboardSummary`](file:///Users/heinzgies/Projects/mcu/src/axiom.rs#L39-L66),
+  [`DashboardWriteResponse`](file:///Users/heinzgies/Projects/mcu/src/axiom.rs#L87-L97),
+  [`DashboardError`](file:///Users/heinzgies/Projects/mcu/src/axiom.rs#L106-L116) — fine
   to keep as decode-only fields, but they should drop the `pub` and the
   `dead_code` annotation; serde keeps them with `#[serde(skip_serializing)]`.
-- [`extract_dataset`](file:///Users/heinzgies/Projects/metrics-tui/src/axiom.rs#L758-L765) is a one-line wrapper around
+- [`extract_dataset`](file:///Users/heinzgies/Projects/mcu/src/axiom.rs#L758-L765) is a one-line wrapper around
   `extract_dataset_metric(...)?.0`. Only 2 of 10 call sites use it. Drop
   it; let callers call `.0` themselves.
 
 ### 4.3 `src/cache.rs`
 
-- [`set_legend_tags`](file:///Users/heinzgies/Projects/metrics-tui/src/cache.rs#L351-L372) and
-  [`set_legend_tags_for_metric`](file:///Users/heinzgies/Projects/metrics-tui/src/cache.rs#L373-L412)
+- [`set_legend_tags`](file:///Users/heinzgies/Projects/mcu/src/cache.rs#L351-L372) and
+  [`set_legend_tags_for_metric`](file:///Users/heinzgies/Projects/mcu/src/cache.rs#L373-L412)
   duplicate the clear-on-empty + insert branches. Collapse into
   `set_legend_tags(query_hash: Option<&str>, dataset, metric, tags)`.
 - Two stale `#[allow(dead_code)]` annotations on `tag_values_for` and
@@ -406,22 +406,22 @@ adds ~80 lines of indirection for zero runtime benefit today.
 
 ### 4.4 `src/viz.rs`
 
-- [`draw_log_stream`](file:///Users/heinzgies/Projects/metrics-tui/src/viz.rs#L1339-L1393)
+- [`draw_log_stream`](file:///Users/heinzgies/Projects/mcu/src/viz.rs#L1339-L1393)
   declares `let events: &[EventRow] = &[];` and only renders the empty-
   state branch in practice. The `EventRow` / `Level` types
-  ([L1286-L1346](file:///Users/heinzgies/Projects/metrics-tui/src/viz.rs#L1286-L1346))
+  ([L1286-L1346](file:///Users/heinzgies/Projects/mcu/src/viz.rs#L1286-L1346))
   exist for a fetcher that hasn't shipped. ~110 dead lines.
-- [`draw_monitor_list`](file:///Users/heinzgies/Projects/metrics-tui/src/viz.rs#L438-L470) is a placeholder ("renderer
+- [`draw_monitor_list`](file:///Users/heinzgies/Projects/mcu/src/viz.rs#L438-L470) is a placeholder ("renderer
   ready; GET /v1/monitors fetch wires in step 16b"). ~30 lines.
-- [`draw_unsupported_placeholder`](file:///Users/heinzgies/Projects/metrics-tui/src/viz.rs#L213-L237) — explicitly
+- [`draw_unsupported_placeholder`](file:///Users/heinzgies/Projects/mcu/src/viz.rs#L213-L237) — explicitly
   `#[allow(dead_code)]`.
-- [`TableResult` / `TableCell::{Int, Bool, Time}`](file:///Users/heinzgies/Projects/metrics-tui/src/viz.rs#L1409-L1430)
+- [`TableResult` / `TableCell::{Int, Bool, Time}`](file:///Users/heinzgies/Projects/mcu/src/viz.rs#L1409-L1430)
   variants `#[allow(dead_code)] // populated by the APL decoder in a
   follow-up`. The `Number`/`String` variants are the only ones the
   current MPL path produces.
-- [`format_x_label`](file:///Users/heinzgies/Projects/metrics-tui/src/viz.rs#L1235-L1244) has a self-doc comment saying
+- [`format_x_label`](file:///Users/heinzgies/Projects/mcu/src/viz.rs#L1235-L1244) has a self-doc comment saying
   it's a copy of `chart::format_time_label`. Should call through.
-- [`truncate_to_width`](file:///Users/heinzgies/Projects/metrics-tui/src/viz.rs#L922-L937) is duplicated inline in
+- [`truncate_to_width`](file:///Users/heinzgies/Projects/mcu/src/viz.rs#L922-L937) is duplicated inline in
   `draw_dashinfo_overlay`. Make it `pub(crate)` and reuse.
 
 ### 4.5 `src/params.rs`
@@ -437,9 +437,9 @@ annotating.
 Same pattern in two places: a public wrapper that just forwards into a
 private worker.
 
-- [`extract_dataset`](file:///Users/heinzgies/Projects/metrics-tui/src/axiom.rs#L758-L765) →
+- [`extract_dataset`](file:///Users/heinzgies/Projects/mcu/src/axiom.rs#L758-L765) →
   `extract_dataset_metric(mpl)?.0`
-- [`classify_chart_query`](file:///Users/heinzgies/Projects/metrics-tui/src/dashboard.rs#L264-L266) →
+- [`classify_chart_query`](file:///Users/heinzgies/Projects/mcu/src/dashboard.rs#L264-L266) →
   `extract_query(chart)`
 
 Either delete the wrapper or `pub(crate)` the worker; today the only
@@ -483,7 +483,7 @@ Numbers:
 | **total** | **15522** | **7210** | **22732** | **32 %** |
 
 `app.rs` is the egregious case: **3630 of its 9377 lines are tests** in a
-single inline `mod tests` block ([L5751-L9377](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L5751-L9377)),
+single inline `mod tests` block ([L5751-L9377](file:///Users/heinzgies/Projects/mcu/src/app.rs#L5751-L9377)),
 210 `#[test]` fns.
 
 The idiomatic Rust pattern for a module this size is the **sibling-file**
@@ -540,7 +540,7 @@ Shared test helpers — `test_app()`, `key()`, `ctrl()`, `type_text()`,
 etc. — collect into one `src/test_support.rs` (gated by `#[cfg(test)]`)
 that every `*_tests.rs` pulls in via `use crate::test_support::*;`. Today
 they're scattered (e.g. `multi_chart_resource()` at
-[`src/app.rs:8206`](file:///Users/heinzgies/Projects/metrics-tui/src/app.rs#L8206), used in 30+ tests in the same file).
+[`src/app.rs:8206`](file:///Users/heinzgies/Projects/mcu/src/app.rs#L8206), used in 30+ tests in the same file).
 
 ### Mechanics of the migration
 

@@ -1,22 +1,24 @@
-use super::grid::{InlineLegendPlan, MIN_GRID_ROW_HEIGHT, NOTE_ROW_HEIGHT, compute_row_heights, fit_inline_legend};
+use super::grid::{
+    InlineLegendPlan, MIN_GRID_ROW_HEIGHT, NOTE_ROW_HEIGHT, compute_row_heights, fit_inline_legend,
+};
 use super::help::{KEYS_HELP_SOURCE, render_keys_help};
-use crate::axiom::{Chart, ChartBase, LayoutItem};
+use crate::axiom::{Chart, ChartBase, KnownChart, LayoutItem};
 
 fn note(id: &str) -> Chart {
-    Chart::Note(ChartBase {
+    Chart::Known(KnownChart::Note(ChartBase {
         id: id.into(),
         name: None,
         query: None,
         extras: Default::default(),
-    })
+    }))
 }
 fn ts(id: &str) -> Chart {
-    Chart::TimeSeries(ChartBase {
+    Chart::Known(KnownChart::TimeSeries(ChartBase {
         id: id.into(),
         name: None,
         query: None,
         extras: Default::default(),
-    })
+    }))
 }
 fn slot(i: &str, x: u32, y: u32, w: u32, h: u32) -> LayoutItem {
     LayoutItem {

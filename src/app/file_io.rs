@@ -3,7 +3,6 @@
 use super::*;
 
 impl App {
-
     pub(super) fn do_open(&mut self, path: std::path::PathBuf, force: bool) {
         if !force && self.is_dirty() {
             self.set_error("E37: No write since last change (add ! to override)".to_string());
@@ -108,22 +107,24 @@ impl App {
                 serde_json::to_string_pretty(resource).context("serialising dashboard JSON")?
             }
         };
-        // Atomic-ish write: temp file in same dir + rename.
-        let mut tmp = target.clone();
-        let mut filename = target
-            .file_name()
-            .ok_or_else(|| anyhow!("target has no file name"))?
-            .to_os_string();
-        filename.push(".tmp");
-        tmp.set_file_name(filename);
-        std::fs::write(&tmp, &text).with_context(|| format!("writing {}", display_path(&tmp)))?;
-        std::fs::rename(&tmp, &target).with_context(|| {
-            format!(
-                "renaming {} → {}",
-                display_path(&tmp),
-                display_path(&target)
-            )
-        })?;
+        // Atomic write: a uniquely-named temp file in the target's
+        // directory followed by `persist` (which is a same-filesystem
+        // rename, atomic on POSIX). Survives concurrent writers and
+        // partial-write crashes — the file on disk is either the old
+        // contents or the fully-flushed new contents.
+        use std::io::Write;
+        let parent = target
+            .parent()
+            .ok_or_else(|| anyhow!("target has no parent directory"))?;
+        let mut tmp = tempfile::NamedTempFile::new_in(parent)
+            .with_context(|| format!("creating temp file in {}", display_path(parent)))?;
+        tmp.write_all(text.as_bytes())
+            .with_context(|| format!("writing {}", display_path(tmp.path())))?;
+        tmp.as_file()
+            .sync_all()
+            .with_context(|| format!("flushing {}", display_path(tmp.path())))?;
+        tmp.persist(&target)
+            .with_context(|| format!("renaming temp file into {}", display_path(&target)))?;
         self.saved_buffer = text;
         self.current_file = Some(target.clone());
         if self.buffer_mode == BufferMode::Dashboard {

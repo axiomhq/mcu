@@ -7,10 +7,10 @@
 //! directly off `loaded_dashboard`, and only the focused tile's viz
 //! kind / opts / time range ever changed during a session. Step 4 of
 //! the cleanup plan collapsed those structures onto `App` directly
-//! (`App.viz_kind`, `App.viz_opts`, `App.time_range`); what remained
+//! (`App.viz_kind`, `App.viz_opts`, `App.time.range`); what remained
 //! here is the classifier surface every caller actually consumes.
 
-use crate::axiom::{Chart, DashboardSummary};
+use crate::axiom::{Chart, ChartBase, DashboardSummary, KnownChart};
 
 /// Which Axiom dashboard element a tile renders. Variants outside
 /// `Line/Bar/Area/Scatter` are accepted by the parser so files authored
@@ -48,15 +48,16 @@ impl VizKind {
     ///   reachable here.
     pub fn from_chart(chart: &Chart) -> Self {
         match chart {
-            Chart::TimeSeries(_) => VizKind::Line,
-            Chart::Heatmap(_) => VizKind::Heatmap,
-            Chart::LogStream(_) => VizKind::LogStream,
-            Chart::Pie(_) => VizKind::Pie,
-            Chart::Scatter(_) => VizKind::Scatter,
-            Chart::Table(_) => VizKind::Table,
-            Chart::TopK(_) => VizKind::TopList,
-            Chart::Statistic(_) => VizKind::Statistic,
-            Chart::Note(_) => VizKind::Note,
+            Chart::Known(KnownChart::TimeSeries(_)) => VizKind::Line,
+            Chart::Known(KnownChart::Heatmap(_)) => VizKind::Heatmap,
+            Chart::Known(KnownChart::LogStream(_)) => VizKind::LogStream,
+            Chart::Known(KnownChart::Pie(_)) => VizKind::Pie,
+            Chart::Known(KnownChart::Scatter(_)) => VizKind::Scatter,
+            Chart::Known(KnownChart::Table(_)) => VizKind::Table,
+            Chart::Known(KnownChart::TopK(_)) => VizKind::TopList,
+            Chart::Known(KnownChart::Statistic(_)) => VizKind::Statistic,
+            Chart::Known(KnownChart::Note(_)) => VizKind::Note,
+            Chart::Unknown(_) => VizKind::Line,
         }
     }
 
@@ -123,6 +124,48 @@ impl VizKind {
                 | VizKind::MonitorList
         )
     }
+
+    /// Every variant in display order. Single source of truth for the
+    /// add-tile / open-tile picker and the `:tile add` completion list.
+    pub const ALL: &'static [VizKind] = &[
+        VizKind::Line,
+        VizKind::Bar,
+        VizKind::Area,
+        VizKind::Scatter,
+        VizKind::Statistic,
+        VizKind::TopList,
+        VizKind::Pie,
+        VizKind::Heatmap,
+        VizKind::Table,
+        VizKind::LogStream,
+        VizKind::MonitorList,
+        VizKind::Note,
+        VizKind::Spacer,
+    ];
+
+    /// Wrap a [`ChartBase`] in the wire `Chart` variant matching this
+    /// kind. Inverse of [`VizKind::from_chart`].
+    ///
+    /// TUI-only kinds (`Bar`, `Area`, `MonitorList`, `Spacer`) don't have
+    /// a dedicated wire variant; they fall back to `Chart::TimeSeries`
+    /// so PUT round-trips cleanly. The TUI-only intent is preserved in
+    /// the editor buffer's `// @viz` pragma.
+    pub fn to_chart(self, base: ChartBase) -> Chart {
+        match self {
+            VizKind::Line | VizKind::Bar | VizKind::Area => {
+                Chart::Known(KnownChart::TimeSeries(base))
+            }
+            VizKind::Scatter => Chart::Known(KnownChart::Scatter(base)),
+            VizKind::Pie => Chart::Known(KnownChart::Pie(base)),
+            VizKind::Heatmap => Chart::Known(KnownChart::Heatmap(base)),
+            VizKind::Table => Chart::Known(KnownChart::Table(base)),
+            VizKind::TopList => Chart::Known(KnownChart::TopK(base)),
+            VizKind::Statistic => Chart::Known(KnownChart::Statistic(base)),
+            VizKind::LogStream => Chart::Known(KnownChart::LogStream(base)),
+            VizKind::Note => Chart::Known(KnownChart::Note(base)),
+            VizKind::MonitorList | VizKind::Spacer => Chart::Known(KnownChart::TimeSeries(base)),
+        }
+    }
 }
 
 /// What kind of query a tile runs. `Mpl` and `Apl` are the runtime
@@ -155,7 +198,10 @@ pub enum Query {
 ///
 /// Charts with no `query` fall back to `Query::Empty`.
 pub fn extract_query(chart: &Chart) -> Query {
-    let q = match chart.base().query.as_ref() {
+    let Some(base) = chart.base() else {
+        return Query::Empty;
+    };
+    let q = match base.query.as_ref() {
         Some(v) => v,
         None => return Query::Empty,
     };

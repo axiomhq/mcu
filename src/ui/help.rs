@@ -76,12 +76,7 @@ pub(super) fn render_keys_help(src: &str) -> Vec<Line<'static>> {
         if let Some(rest) = line.strip_prefix("## ") {
             // Blank line above section headers (except the first) so
             // sections breathe.
-            if !out.is_empty()
-                && !out
-                    .last()
-                    .map(|l| l.spans.is_empty())
-                    .unwrap_or(false)
-            {
+            if !out.is_empty() && !out.last().map(|l| l.spans.is_empty()).unwrap_or(false) {
                 out.push(Line::raw(""));
             }
             out.push(Line::from(Span::styled(
@@ -102,10 +97,7 @@ pub(super) fn render_keys_help(src: &str) -> Vec<Line<'static>> {
         }
         if let Some((key, desc)) = line.split_once('\t') {
             out.push(Line::from(vec![
-                Span::styled(
-                    format!("  {key:<22}"),
-                    Style::default().fg(Color::Yellow),
-                ),
+                Span::styled(format!("  {key:<22}"), Style::default().fg(Color::Yellow)),
                 Span::raw("  "),
                 Span::styled(desc.to_string(), Style::default().fg(Color::Gray)),
             ]));

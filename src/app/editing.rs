@@ -10,7 +10,6 @@
 use super::*;
 
 impl App {
-
     /// Flat dispatcher for [`Command`]s produced by the Normal-mode parser.
     ///
     /// Adding a new Normal-mode feature should be a single arm here plus
@@ -28,7 +27,7 @@ impl App {
             Command::Apply { op, target, count } => self.apply_operator(op, target, count),
             Command::EnterInsert(at) => self.enter_insert_at(at),
             Command::EnterCommand => self.enter_command_mode(),
-            Command::RunQuery | Command::RefreshQuery => self.run_query(),
+            Command::RunQuery => self.run_query(),
             Command::Undo if !self.editor.undo() => self.status = "nothing to undo".to_string(),
             Command::Undo => {}
             Command::Redo if !self.editor.redo() => self.status = "nothing to redo".to_string(),
@@ -48,17 +47,21 @@ impl App {
             // Esc in Editor Normal mode: dismiss the error overlay if
             // present; else, if we arrived in Solo by zooming a tile,
             // return to the grid (vim's "back out" intuition for Esc).
-            Command::DismissError if self.dismiss_error() =>
-                self.status = "error dismissed".to_string(),
+            Command::DismissError if self.dismiss_error() => {
+                self.status = "error dismissed".to_string()
+            }
             Command::DismissError
                 if self.view_mode == ViewMode::Solo && self.loaded_dashboard.is_some() =>
-                self.cmd_grid(),
+            {
+                self.cmd_grid()
+            }
             Command::DismissError => {}
             Command::DeleteCharUnder { count } => {
                 for _ in 0..count {
                     self.editor.delete_next_char();
                 }
             }
+            Command::ReplaceChar { ch, count } => self.replace_chars(ch, count),
             Command::Paste { after, count } => self.paste(after, count),
             Command::RepeatFind { reverse, count } => self.repeat_find(reverse, count),
             Command::RepeatLastChange => self.repeat_last_change(),
@@ -74,8 +77,42 @@ impl App {
             Command::Apply { .. }
                 | Command::Paste { .. }
                 | Command::DeleteCharUnder { .. }
+                | Command::ReplaceChar { .. }
                 | Command::EnterInsert(_)
         )
+    }
+
+    /// Vim `Nrc`: replace `count` chars at/after the cursor with `ch`.
+    /// If the line has fewer than `count` chars remaining, the command
+    /// aborts (no partial edit) — same as vim. The cursor ends up on
+    /// the last replaced char (`pos + count - 1`).
+    fn replace_chars(&mut self, ch: char, count: usize) {
+        if count == 0 {
+            return;
+        }
+        let (row, col) = self.editor.cursor();
+        let line_len = self
+            .editor
+            .lines()
+            .get(row)
+            .map(|l| l.chars().count())
+            .unwrap_or(0);
+        // Newline replacement (`r<Enter>`) collapses `count` chars into
+        // one line break, so the line-length check is unchanged.
+        if col + count > line_len {
+            self.status = format!("r: line has fewer than {count} char(s) remaining");
+            return;
+        }
+        let replacement: String = std::iter::repeat_n(ch, count).collect();
+        for _ in 0..count {
+            self.editor.delete_next_char();
+        }
+        self.editor.insert_str(&replacement);
+        // Vim leaves the cursor on the last replaced char (newline
+        // replacement is the exception: cursor moves to the new line).
+        if ch != '\n' {
+            self.editor.move_cursor(tui_textarea::CursorMove::Back);
+        }
     }
 
     fn repeat_find(&mut self, reverse: bool, count: usize) {

@@ -10,7 +10,7 @@ use ratatui::{
 
 use super::pane_block;
 use crate::app::App;
-use crate::axiom::{Chart, LayoutItem};
+use crate::axiom::{Chart, ChartKnownExt, DashboardSummaryExt, KnownChart, LayoutItem};
 use crate::viz;
 
 /// Minimum number of terminal rows per virtual grid row **for rows
@@ -39,7 +39,7 @@ pub(super) fn draw_dashboard_grid(f: &mut Frame, app: &mut App, area: Rect) {
     };
     let charts = resource.dashboard.charts.clone();
     let layout = resource.dashboard.layout.clone();
-    let dash_name = resource.name().to_string();
+    let dash_name = resource.name_or_unnamed().to_string();
 
     // Outer frame for the whole dashboard pane.
     let focused = app.focus == crate::app::Pane::Dashboard;
@@ -48,7 +48,18 @@ pub(super) fn draw_dashboard_grid(f: &mut Frame, app: &mut App, area: Rect) {
         crate::app::TileSubMode::Move { .. } => " MOVE",
         crate::app::TileSubMode::Resize { .. } => " RESIZE",
         crate::app::TileSubMode::ConfirmDelete => " DELETE?",
-        crate::app::TileSubMode::AddPick { .. } => " ADD",
+        crate::app::TileSubMode::PickViz {
+            action: crate::app::PickVizAction::Add,
+            ..
+        } => " ADD",
+        crate::app::TileSubMode::PickViz {
+            action: crate::app::PickVizAction::Open { above: false, .. },
+            ..
+        } => " OPEN↓",
+        crate::app::TileSubMode::PickViz {
+            action: crate::app::PickVizAction::Open { above: true, .. },
+            ..
+        } => " OPEN↑",
     };
     let dirty_pip = if app.dashboard_dirty { " [+]" } else { "" };
     let title = format!(
@@ -229,7 +240,7 @@ pub(super) fn compute_row_heights(
 ) -> Vec<u32> {
     let mut has_non_note = vec![false; virt_rows];
     for (i, chart) in charts.iter().enumerate() {
-        if matches!(chart, Chart::Note(_)) {
+        if matches!(chart, Chart::Known(KnownChart::Note(_))) {
             continue;
         }
         let (_gx, gy, _gw, gh) = resolve_slot(layout, chart, i);
@@ -272,7 +283,7 @@ pub(super) fn compute_row_heights(
 /// 2-per-row auto-stack at default 6×6 dimensions when no
 /// `LayoutItem` exists. Returns `(x, y, w, h)`.
 fn resolve_slot(layout: &[LayoutItem], chart: &Chart, idx: usize) -> (u32, u32, u32, u32) {
-    if let Some(l) = layout.iter().find(|l| l.i == chart.base().id) {
+    if let Some(l) = layout.iter().find(|l| l.i == chart.known_base().id) {
         (l.x, l.y.unwrap_or(0), l.w, l.h)
     } else {
         let row = (idx / 2) as u32;
@@ -293,17 +304,18 @@ fn resolve_slot(layout: &[LayoutItem], chart: &Chart, idx: usize) -> (u32, u32, 
 ///   * the per-tile fetch is still in flight (shows "loading..."),
 ///   * the per-tile fetch errored (shows the error message).
 fn draw_grid_tile(f: &mut Frame, app: &App, chart: &Chart, area: Rect, highlighted: bool) {
-    let base = chart.base();
+    let base = chart.known_base();
     let kind_glyph = match chart {
-        Chart::TimeSeries(_) => "⌈⌉",
-        Chart::Heatmap(_) => "▦",
-        Chart::LogStream(_) => "≡",
-        Chart::Pie(_) => "●",
-        Chart::Scatter(_) => "⋮",
-        Chart::Table(_) => "⊞",
-        Chart::TopK(_) => "≡",
-        Chart::Statistic(_) => "No",
-        Chart::Note(_) => "✎",
+        Chart::Known(KnownChart::TimeSeries(_)) => "⌈⌉",
+        Chart::Known(KnownChart::Heatmap(_)) => "▦",
+        Chart::Known(KnownChart::LogStream(_)) => "≡",
+        Chart::Known(KnownChart::Pie(_)) => "●",
+        Chart::Known(KnownChart::Scatter(_)) => "⋮",
+        Chart::Known(KnownChart::Table(_)) => "⊞",
+        Chart::Known(KnownChart::TopK(_)) => "≡",
+        Chart::Known(KnownChart::Statistic(_)) => "No",
+        Chart::Known(KnownChart::Note(_)) => "✎",
+        Chart::Unknown(_) => "?",
     };
     // Per-tile status pip in the title bar.
     let pip = app
@@ -321,7 +333,9 @@ fn draw_grid_tile(f: &mut Frame, app: &App, chart: &Chart, area: Rect, highlight
     let title = format!(
         " {} {} · {} {} ",
         kind_glyph,
-        chart.type_str(),
+        chart
+            .type_str()
+            .expect("mcu expects Chart::Known; got Chart::Unknown"),
         base.name.as_deref().unwrap_or("(unnamed)"),
         pip,
     );
@@ -350,8 +364,8 @@ fn draw_grid_tile(f: &mut Frame, app: &App, chart: &Chart, area: Rect, highlight
     // The exact key isn't modelled in this codebase, so probe the
     // conventional ones and fall back to an empty body (which the
     // renderer collapses to a single divider line).
-    let body = if matches!(chart, Chart::Note(_)) {
-        let extras = &chart.base().extras;
+    let body = if matches!(chart, Chart::Known(KnownChart::Note(_))) {
+        let extras = &chart.known_base().extras;
         let text = ["markdown", "text", "body", "content"]
             .into_iter()
             .find_map(|k| extras.get(k).and_then(|v| v.as_str()))
@@ -432,7 +446,7 @@ fn draw_grid_tile(f: &mut Frame, app: &App, chart: &Chart, area: Rect, highlight
                     Block::default(),
                     chart_area,
                 );
-                draw_inline_legend(f, series, &app.legend_label_tags, strip);
+                draw_inline_legend(f, series, &app.legend.label_tags, strip);
             } else {
                 viz::draw(
                     f,
@@ -545,8 +559,10 @@ fn draw_inline_legend(
         summary.header.chars().count() + 2
     };
     let mut use_header = header_prefix_w > 0;
-    let mut plan =
-        fit_inline_legend(&labels, (area.width as usize).saturating_sub(header_prefix_w));
+    let mut plan = fit_inline_legend(
+        &labels,
+        (area.width as usize).saturating_sub(header_prefix_w),
+    );
     if use_header && plan.shown.is_empty() {
         // No room for any bullet alongside the header — drop it.
         use_header = false;

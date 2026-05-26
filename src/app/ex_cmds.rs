@@ -8,10 +8,30 @@ use crate::dashboard::VizKind;
 
 use super::*;
 
+/// Sub-commands for `:dash`, in display order. Shared with
+/// `cmdline_complete` so the completion menu can't drift away from the
+/// dispatch table here.
+pub(crate) const DASH_SUBS: &[&str] = &["ls", "new", "rm"];
+
+/// Sub-commands for `:tile`, in display order. Shared with
+/// `cmdline_complete` for the same reason as `DASH_SUBS`.
+pub(crate) const TILE_SUBS: &[&str] = &[
+    "add", "cut", "inspect", "json", "mv", "open", "paste", "rm", "size", "title", "undo", "yank",
+];
+
 /// Parse `args[1]` / `args[2]` as `u32`. Used by `:tile mv` and `:tile size`.
 /// `nonzero=true` rejects zero values (size needs ≥1). Returns the
 /// already-formatted error string so callers can pass it straight to
 /// `set_error`.
+/// Parse `args[1]` as an optional decimal count, defaulting to 1.
+/// Anything that doesn't parse as a positive integer becomes 1 —
+/// matches vim's tolerance for spurious args.
+fn parse_optional_count(arg: Option<&str>) -> usize {
+    arg.and_then(|s| s.parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(1)
+}
+
 fn parse_two_u32(
     args: &[&str],
     sub: &str,
@@ -20,7 +40,9 @@ fn parse_two_u32(
     nonzero: bool,
 ) -> Result<(u32, u32), String> {
     let (Some(av), Some(bv)) = (args.get(1), args.get(2)) else {
-        return Err(format!(":tile {sub} <{a}> <{b}>: two integer args required"));
+        return Err(format!(
+            ":tile {sub} <{a}> <{b}>: two integer args required"
+        ));
     };
     let kind_hint = if nonzero { "positive" } else { "non-negative" };
     let (Ok(x), Ok(y)) = (av.parse::<u32>(), bv.parse::<u32>()) else {
@@ -35,7 +57,6 @@ fn parse_two_u32(
 }
 
 impl App {
-
     /// Dispatch a stripped command string to the matching action. Empty input
     /// is a no-op (matches vim). Unknown commands surface as an error overlay.
     pub fn execute_command(&mut self, cmd: &str) {
@@ -52,9 +73,9 @@ impl App {
         };
         match head {
             "q" | "quit" => self.cmd_quit(bang),
-            "w" | "write" => self.cmd_write(args.first().copied()),
+            "w" | "write" => self.cmd_write(args.first().copied(), bang),
             "wq" => self.cmd_write_quit(args.first().copied(), bang),
-            "x" => self.cmd_update_quit(args.first().copied()),
+            "x" => self.cmd_update_quit(args.first().copied(), bang),
             "e" | "edit" => self.cmd_edit(args.first().copied(), bang),
             "r" | "run" => self.cmd_run(args.first().copied()),
             "ds" | "datasets" => self.fetch_datasets(),
@@ -104,18 +125,19 @@ impl App {
     /// same.
     fn cmd_param(&mut self, rest: &str, clear_all: bool) {
         if clear_all {
-            let n = self.cli_params.len();
-            self.cli_params.clear();
+            let n = self.params.cli.len();
+            self.params.cli.clear();
             self.status = format!("cleared {n} param(s)");
             return;
         }
         let rest = rest.trim();
         if rest.is_empty() {
-            if self.cli_params.is_empty() {
+            if self.params.cli.is_empty() {
                 self.status = "no params set".to_string();
             } else {
                 let s = self
-                    .cli_params
+                    .params
+                    .cli
                     .iter()
                     .map(|(k, v)| format!("${k}={v}"))
                     .collect::<Vec<_>>()
@@ -134,7 +156,7 @@ impl App {
             return;
         }
         if value.is_empty() {
-            if self.cli_params.remove(name).is_some() {
+            if self.params.cli.remove(name).is_some() {
                 self.status = format!("cleared ${name}");
             } else {
                 self.status = format!("${name} not set");
@@ -148,7 +170,7 @@ impl App {
             self.set_error(format!("invalid value for ${name}: {e}"));
             return;
         }
-        self.cli_params.insert(name.to_string(), value.to_string());
+        self.params.cli.insert(name.to_string(), value.to_string());
         self.status = format!("set ${name}={value}");
     }
 
@@ -166,9 +188,10 @@ impl App {
         // Dataset is best-effort: the explorer just needs `apl` set;
         // `metricsDataset` selects the right tab.
         let dataset = mpl::extract_dataset_metric(&mpl).map(|p| p.0).ok();
-        let (deployment_url, org_id) = match Config::load()
-            .and_then(|cfg| cfg.active().map(|(_, dep)| (dep.url.clone(), dep.org_id.clone())))
-        {
+        let (deployment_url, org_id) = match Config::load().and_then(|cfg| {
+            cfg.active()
+                .map(|(_, dep)| (dep.url.clone(), dep.org_id.clone()))
+        }) {
             Ok(v) => v,
             Err(e) => return self.set_error(format!("axiom config: {e}")),
         };
@@ -258,14 +281,11 @@ impl App {
                 .iter()
                 .position(|(_, d)| cur_start == format!("now-{d}") && cur_end == "now")
                 .unwrap_or(0);
-            self.time_picker = Some(TimePickerState::Presets { cursor });
+            self.time.picker = Some(TimePickerState::Presets { cursor });
             return;
         }
         let (new_start, new_end) = match args {
-            ["reset"] | ["default"] => (
-                DEFAULT_START.to_string(),
-                DEFAULT_END.to_string(),
-            ),
+            ["reset"] | ["default"] => (DEFAULT_START.to_string(), DEFAULT_END.to_string()),
             [start] => (start.to_string(), DEFAULT_END.to_string()),
             [start, end] => (start.to_string(), end.to_string()),
             _ => {
@@ -300,9 +320,9 @@ impl App {
             && let Some(resource) = self.loaded_dashboard.as_ref()
             && let Some(chart) = resource.dashboard.charts.get(self.selected_chart_idx)
         {
-            let chart_id = chart.base().id.clone();
+            let chart_id = chart.known_base().id.clone();
             let label = chart
-                .base()
+                .known_base()
                 .name
                 .clone()
                 .unwrap_or_else(|| chart_id.clone());
@@ -313,8 +333,7 @@ impl App {
             {
                 Some(id) => self.status = format!("trace `{label}`: {id}"),
                 None => {
-                    self.status =
-                        format!("no trace id for `{label}` yet (tile hasn't returned)")
+                    self.status = format!("no trace id for `{label}` yet (tile hasn't returned)")
                 }
             }
             return;
@@ -336,19 +355,36 @@ impl App {
         self.dashinfo_visible = !self.dashinfo_visible;
     }
 
-    /// `:tile <sub> [args]` — mutate the selected tile.
+    /// `:tile <sub>[!] [args]` — mutate the selected tile.
     ///
     /// Sub-commands (all operate on the currently-selected tile):
-    /// * `add <kind>` — insert a new tile of the given viz kind
+    /// * `add <kind>` — insert a new tile of the given viz kind at
+    ///   the first free grid slot.
     /// * `rm` — delete the selected tile (no confirm; that's the `d`
-    ///   keyboard flow)
-    /// * `mv <x> <y>` — move to absolute virtual-grid coordinates
-    /// * `size <w> <h>` — resize to absolute w/h
-    /// * `title <text>` — rename the selected tile
+    ///   keyboard flow).
+    /// * `mv <x> <y>` / `mv! <x> <y>` — move to absolute virtual-grid
+    ///   coordinates. Strict (rejects collisions) by default; the
+    ///   bang variant auto-shoves overlapping tiles out of the way
+    ///   (matches the `m`+arrows keyboard flow).
+    /// * `size <w> <h>` / `size! <w> <h>` — same strict / shove
+    ///   split for resize.
+    /// * `title <text>` — rename the selected tile.
+    /// * `yank [n]` / `cut [n]` — mirror the `y` / `x` keyboard verbs.
+    /// * `paste [n]` / `paste! [n]` — mirror `p` (below) / `P` (above).
+    /// * `open <kind> [n]` / `open! <kind> [n]` — mirror `o` / `O`
+    ///   with a kind already chosen (skips the picker overlay).
+    /// * `undo` — one-level dashboard undo (vim's `u`).
     fn cmd_tile(&mut self, args: &[&str]) {
-        let Some(sub) = args.first().copied() else {
-            self.set_error(":tile needs a sub-command (add, rm, mv, size, title)".to_string());
+        let Some(raw_sub) = args.first().copied() else {
+            self.set_error(":tile needs a sub-command (see :help)".to_string());
             return;
+        };
+        // Strip a trailing `!` on the sub-command so `:tile mv! 3 0`
+        // and `:tile paste! 2` parse cleanly. Outer head-bang is
+        // unused for `:tile`.
+        let (sub, sub_bang) = match raw_sub.strip_suffix('!') {
+            Some(rest) => (rest, true),
+            None => (raw_sub, false),
         };
         if self.loaded_dashboard.is_none() {
             self.set_error(":tile: no dashboard loaded".to_string());
@@ -387,13 +423,24 @@ impl App {
                         .find(|l| l.i == *id)
                         .map(|l| (l.x as i32, l.y.unwrap_or(0) as i32))
                         .unwrap_or((0, 0));
-                    tile_ops::translate(
-                        &mut resource.dashboard.layout,
-                        id,
-                        x as i32 - cx,
-                        y as i32 - cy,
-                    )
-                    .map(|()| format!(":tile mv {x} {y} ok"))
+                    let dx = x as i32 - cx;
+                    let dy = y as i32 - cy;
+                    if sub_bang {
+                        crate::app::tile_ops_shove::shove_move(
+                            &mut resource.dashboard.layout,
+                            id,
+                            dx,
+                            dy,
+                        )
+                        .map(|o| match (o.moved.len().saturating_sub(1), o.new_rows) {
+                            (0, 0) => format!(":tile mv! {x} {y} ok"),
+                            (n, 0) => format!(":tile mv! {x} {y} ok: {n} shoved"),
+                            (n, r) => format!(":tile mv! {x} {y} ok: {n} shoved, +{r} row(s)"),
+                        })
+                    } else {
+                        tile_ops::translate(&mut resource.dashboard.layout, id, dx, dy)
+                            .map(|()| format!(":tile mv {x} {y} ok"))
+                    }
                 }),
                 Err(msg) => self.set_error(msg),
             },
@@ -407,13 +454,24 @@ impl App {
                         .find(|l| l.i == *id)
                         .map(|l| (l.w as i32, l.h as i32))
                         .unwrap_or((6, 6));
-                    tile_ops::resize(
-                        &mut resource.dashboard.layout,
-                        id,
-                        w as i32 - cw,
-                        h as i32 - ch,
-                    )
-                    .map(|()| format!(":tile size {w} {h} ok"))
+                    let dw = w as i32 - cw;
+                    let dh = h as i32 - ch;
+                    if sub_bang {
+                        crate::app::tile_ops_shove::shove_resize(
+                            &mut resource.dashboard.layout,
+                            id,
+                            dw,
+                            dh,
+                        )
+                        .map(|o| match (o.moved.len().saturating_sub(1), o.new_rows) {
+                            (0, 0) => format!(":tile size! {w} {h} ok"),
+                            (n, 0) => format!(":tile size! {w} {h} ok: {n} shoved"),
+                            (n, r) => format!(":tile size! {w} {h} ok: {n} shoved, +{r} row(s)"),
+                        })
+                    } else {
+                        tile_ops::resize(&mut resource.dashboard.layout, id, dw, dh)
+                            .map(|()| format!(":tile size {w} {h} ok"))
+                    }
                 }),
                 Err(msg) => self.set_error(msg),
             },
@@ -429,8 +487,44 @@ impl App {
                         .map(|()| format!(":tile title `{title}`"))
                 });
             }
+            "yank" => {
+                let n = parse_optional_count(args.get(1).copied());
+                self.yank_focused(n);
+            }
+            "cut" => {
+                let n = parse_optional_count(args.get(1).copied());
+                self.cut_focused(n);
+            }
+            "paste" => {
+                let n = parse_optional_count(args.get(1).copied());
+                // `paste!` mirrors the `P` key (above); plain `paste`
+                // is `p` (below).
+                self.paste_yanked(!sub_bang, n);
+            }
+            "open" => {
+                let Some(kind_str) = args.get(1) else {
+                    self.set_error(":tile open <kind> [n]: kind required".to_string());
+                    return;
+                };
+                let Some(kind) = crate::dashboard::VizKind::parse(kind_str) else {
+                    self.set_error(format!(":tile open: unknown viz kind `{kind_str}`"));
+                    return;
+                };
+                let n = parse_optional_count(args.get(2).copied());
+                self.snapshot_dashboard_for_undo();
+                let mut placed = 0usize;
+                for _ in 0..n.max(1) {
+                    if !self.open_new_row_with_kind(sub_bang, kind) {
+                        break;
+                    }
+                    placed += 1;
+                }
+                let label = if sub_bang { "opened above" } else { "opened below" };
+                self.status = format!("{label}: {placed} {}", kind.as_str());
+            }
+            "undo" => self.dashboard_undo(),
             other => self.set_error(format!(
-                ":tile {other}: unknown sub-command (add, rm, mv, size, title)"
+                ":tile {other}: unknown sub-command (add, rm, mv, size, title, yank, cut, paste, open, undo)"
             )),
         }
     }
@@ -470,7 +564,11 @@ impl App {
             return;
         };
         let name = args[1..].join(" ");
-        let name = if name.is_empty() { "new tile".to_string() } else { name };
+        let name = if name.is_empty() {
+            "new tile".to_string()
+        } else {
+            name
+        };
         let resource = self.loaded_dashboard.as_mut().unwrap();
         let id = tile_ops::insert_tile(
             &mut resource.dashboard.charts,
@@ -523,30 +621,25 @@ impl App {
     ///
     /// Sub-commands:
     /// * `ls`           — open the searchable dashboard picker
-    /// * `save`         — PUT current dashboard (last-write-wins)
     /// * `rm <uid>`     — DELETE a dashboard by uid
     /// * `new from-buffer [name]` — POST a new dashboard from the buffer
     ///
-    /// `:dash save` without a loaded dashboard, or `:dash rm` without
-    /// an arg, surfaces an error overlay instead of silently doing
-    /// nothing.
+    /// Saving the *loaded* dashboard is `:w` / `:w!` — same write
+    /// pattern as MPL buffers, no `:dash save` alias.
     fn cmd_dash(&mut self, args: &[&str], _bang: bool) {
         let sub = match args.first().copied() {
             Some(s) => s,
             None => {
-                self.set_error(":dash needs a sub-command (ls, save, rm, new)".to_string());
+                self.set_error(":dash needs a sub-command (ls, rm, new)".to_string());
                 return;
             }
         };
         match sub {
             "ls" => self.cmd_dashboards(),
-            "save" => self.cmd_dash_save(),
             "rm" => self.cmd_dash_rm(args.get(1).copied()),
             "new" => self.cmd_dash_new(&args[1..]),
             other => {
-                self.set_error(format!(
-                    ":dash {other}: unknown sub-command (ls, save, rm, new)"
-                ));
+                self.set_error(format!(":dash {other}: unknown sub-command (ls, rm, new)"));
             }
         }
     }
@@ -584,34 +677,49 @@ impl App {
         let doc = build_dashboard_doc_from_buffer(&name, self.viz_kind, &self.query_text());
         let Some((client, tx, _)) =
             self.fetch_prepare(Some(format!("creating dashboard `{name}`…")))
-        else { return };
+        else {
+            return;
+        };
         self.runtime.spawn(async move {
             // Server assigns the uid; pass an empty placeholder.
             let result = client.create_dashboard(&doc, None, None).await;
-            let _ = tx.send(AppEvent::DashboardSaved { uid: String::new(), result });
+            let _ = tx.send(AppEvent::DashboardSaved {
+                uid: String::new(),
+                result,
+            });
         });
     }
 
-    /// `:dash save` — PUT the in-memory dashboard back to the server.
-    /// Always last-write-wins (`overwrite=true`); the bang dance was
-    /// retired along with the rest of the per-command bang surface.
-    fn cmd_dash_save(&mut self) {
-        // Clone up-front so the immutable borrow on `loaded_dashboard`
-        // ends before `fetch_prepare` reaches `&mut self`.
+    /// Send the loaded dashboard to the server. Wired to `:w` /
+    /// `:w!` in dashboard mode when no `current_file` is set
+    /// (i.e. the dashboard was loaded from Axiom, not from disk).
+    ///
+    /// `overwrite=false` (plain `:w`) means the server's optimistic
+    /// version check fires — a 412 surfaces as an error so the user
+    /// can rebase and retry. `:w!` skips the check.
+    pub(super) fn put_loaded_dashboard(&mut self, overwrite: bool) {
         let Some((uid, doc, version)) = self
             .loaded_dashboard
             .as_ref()
             .map(|r| (r.uid.clone(), r.dashboard.clone(), r.version))
         else {
-            return self.set_error(":dash save: no dashboard loaded".to_string());
+            return self.set_error(":w: no dashboard loaded".to_string());
         };
+        let verb = if overwrite { ":w!" } else { ":w" };
         let Some((client, tx, _)) =
-            self.fetch_prepare(Some(format!("saving dashboard {uid}…")))
-        else { return };
+            self.fetch_prepare(Some(format!("{verb}: saving dashboard {uid}…")))
+        else {
+            return;
+        };
         let uid_for_event = uid.clone();
         self.runtime.spawn(async move {
-            let result = client.put_dashboard(&uid, &doc, version, true, None).await;
-            let _ = tx.send(AppEvent::DashboardSaved { uid: uid_for_event, result });
+            let result = client
+                .put_dashboard(&uid, &doc, version, overwrite, None)
+                .await;
+            let _ = tx.send(AppEvent::DashboardSaved {
+                uid: uid_for_event,
+                result,
+            });
         });
     }
 
@@ -623,9 +731,10 @@ impl App {
             return self.set_error(":dash rm <uid>: uid argument required".to_string());
         };
         let uid = uid_raw.trim_matches('"').to_string();
-        let Some((client, tx, _)) =
-            self.fetch_prepare(Some(format!("deleting dashboard {uid}…")))
-        else { return };
+        let Some((client, tx, _)) = self.fetch_prepare(Some(format!("deleting dashboard {uid}…")))
+        else {
+            return;
+        };
         self.runtime.spawn(async move {
             let result = client.delete_dashboard(&uid).await;
             let _ = tx.send(AppEvent::DashboardDeleted { uid, result });
@@ -653,9 +762,14 @@ impl App {
                 self.status = format!("{n} dashboard(s) (cached, refreshing…)");
                 (None, AppEvent::DashboardsRefreshed)
             }
-            None => (Some("fetching dashboards…".to_string()), AppEvent::DashboardsFetched),
+            None => (
+                Some("fetching dashboards…".to_string()),
+                AppEvent::DashboardsFetched,
+            ),
         };
-        let Some((client, tx, cache)) = self.fetch_prepare(status) else { return };
+        let Some((client, tx, cache)) = self.fetch_prepare(status) else {
+            return;
+        };
         self.runtime.spawn(async move {
             let result = client.list_dashboards().await;
             if let Ok(items) = &result {
@@ -679,8 +793,7 @@ impl App {
             Some("tile") => self.run_focused_tile_query(),
             Some("dashboard") => {
                 self.run_tile_queries();
-                self.status =
-                    format!("refetching {} tile(s)…", self.tile_results.len().max(1));
+                self.status = format!("refetching {} tile(s)…", self.tile_results.len().max(1));
             }
             Some(other) => self.set_error(format!(
                 ":run {other}: unknown target (try `tile` or `dashboard`)"
@@ -690,39 +803,78 @@ impl App {
 
     pub(super) fn cmd_quit(&mut self, force: bool) {
         if !force && self.is_dirty() {
-            return self.set_error(
-                "E37: No write since last change (add ! to override)".to_string(),
-            );
+            return self
+                .set_error("E37: No write since last change (add ! to override)".to_string());
         }
         self.persist_query();
         self.should_quit = true;
     }
 
-    fn cmd_write(&mut self, path: Option<&str>) {
+    /// `:w [path]` / `:w! [path]` — save the current artifact.
+    ///
+    /// Routes on `buffer_mode` and whether `current_file` is set:
+    ///
+    /// * MPL buffer — write the editor text to `path` or
+    ///   `current_file` (`:w!` is the same write; we have no
+    ///   readonly concept).
+    /// * Dashboard mode + explicit `path` — always serialise to
+    ///   that path as JSON. Same in MPL terms: vim's `:w <alt>` lets
+    ///   you fork to a new file regardless of where the buffer came
+    ///   from.
+    /// * Dashboard mode + no path + `current_file` set (loaded from
+    ///   disk) — write JSON back to that file.
+    /// * Dashboard mode + no path + no `current_file` (loaded from
+    ///   the Axiom server) — PUT to the server.
+    ///   * `:w`  → `overwrite=false` so the server's version check
+    ///     rejects concurrent writes (412 surfaces as an error;
+    ///     reload then retry, or use `:w!`).
+    ///   * `:w!` → `overwrite=true` (last-write-wins).
+    fn cmd_write(&mut self, path: Option<&str>, bang: bool) {
+        if self.buffer_mode == BufferMode::Dashboard
+            && path.is_none()
+            && self.current_file.is_none()
+        {
+            return self.put_loaded_dashboard(bang);
+        }
         match self.write_file(path.map(std::path::PathBuf::from)) {
             Ok(p) => self.status = format!("wrote {}", display_path(&p)),
             Err(e) => self.set_error(format!("write failed: {e}")),
         }
     }
 
-    fn cmd_write_quit(&mut self, path: Option<&str>, _force: bool) {
-        self.write_then_quit(path, true);
+    fn cmd_write_quit(&mut self, path: Option<&str>, bang: bool) {
+        self.write_then_quit(path, bang, true);
     }
 
     /// `:x` — write only when modified, then quit. Equivalent to `:wq`
     /// when dirty, or `:q` when clean.
-    fn cmd_update_quit(&mut self, path: Option<&str>) {
-        self.write_then_quit(path, self.is_dirty() || path.is_some());
+    fn cmd_update_quit(&mut self, path: Option<&str>, bang: bool) {
+        let dirty = self.is_dirty() || self.dashboard_dirty;
+        self.write_then_quit(path, bang, dirty || path.is_some());
     }
 
     /// Shared body for `:wq` / `:x`: optionally write, then quit
     /// unless the write failed (in which case the error is surfaced
     /// and `should_quit` stays false).
-    fn write_then_quit(&mut self, path: Option<&str>, write: bool) {
-        if write
-            && let Err(e) = self.write_file(path.map(std::path::PathBuf::from))
-        {
-            return self.set_error(format!("write failed: {e}"));
+    ///
+    /// For server-side dashboard saves (async PUT), the quit fires
+    /// immediately after the request is dispatched; the
+    /// `DashboardSaved` event lands on the way out and the status is
+    /// printed after the alt-screen tears down. Synchronous failure
+    /// modes (no client, no dashboard) still abort the quit cleanly.
+    fn write_then_quit(&mut self, path: Option<&str>, bang: bool, write: bool) {
+        if write {
+            if self.buffer_mode == BufferMode::Dashboard
+                && path.is_none()
+                && self.current_file.is_none()
+            {
+                self.put_loaded_dashboard(bang);
+                if self.last_error.is_some() {
+                    return;
+                }
+            } else if let Err(e) = self.write_file(path.map(std::path::PathBuf::from)) {
+                return self.set_error(format!("write failed: {e}"));
+            }
         }
         self.persist_query();
         self.should_quit = true;

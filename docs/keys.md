@@ -1,7 +1,7 @@
 # Key bindings
 
 This file is the single source of truth for the in-app help modal.
-Open it from anywhere in metrics-tui with `?`. Any key dismisses it.
+Open it from anywhere in mcu with `?`. Any key dismisses it.
 
 ## Conventions
 
@@ -14,9 +14,12 @@ Open it from anywhere in metrics-tui with `?`. Any key dismisses it.
   the dashboard grid, so Esc returns to Grid.
 - **`Enter` commits in pickers and forms**, and runs the query in
   the editor.
-- **Destructive ex-commands take no bang.** `:dash save`,
-  `:dash rm`, `:tile rm` mean what they say; `!` is reserved for
-  the vim-standard "force" semantics on `:q!`, `:e!`, `:wq!`.
+- **`!` is reserved for vim-standard "force".** `:q!`, `:e!`,
+  `:wq!`, and `:w!` follow vim semantics. `:w!` on a server-loaded
+  dashboard forces `overwrite=true` past the server's version
+  check; plain `:w` refuses to stomp a concurrent edit. Other
+  destructive commands (`:dash rm`, `:tile rm`) take no bang and
+  mean what they say.
 
 Format used by the in-app renderer:
 
@@ -91,12 +94,22 @@ x	clear the selected param
 Esc / h	back to editor
 
 ## Dashboard pane (grid view)
-h j k l / ←↓↑→	spatially move tile selection
+h j k l / ←↓↑→	spatially move tile selection (accepts a count: `3j`)
 Tab / Shift-Tab	cycle tile selection in layout order
 Enter / v	zoom selected tile into solo view
 m / s	enter Move / Resize sub-mode (Enter to confirm, Esc to cancel)
-a	add a new tile (kind picker overlay)
+		  arrows now auto-shove neighbours instead of blocking;
+		  cascade is right-first, falling through to a new row
+		  below when the chain wraps past column 12.
+		  Esc reverts every shoved tile to its pre-submode position.
+a	add a new tile (kind picker overlay, placed at first free slot)
 d	delete selected tile (y to confirm)
+y	yank focused tile (count: `3y` yanks 3 tiles in row-major order)
+x	cut focused tile (delete + yank, no confirm; count: `2x`)
+p / P	paste yanked tile(s) below / above focused; preserves block shape
+o / O	open a new tile in a new row below / above focused
+		  (count: `3o` repeats; kind picker prompts once and is reused)
+u	one-level dashboard undo (toggles with redo on second press)
 Ctrl-d / Ctrl-u	scroll grid down / up by 10 rows
 Ctrl-f / Ctrl-b	scroll grid down / up by 20 rows
 g / G	jump to top / bottom of grid
@@ -142,12 +155,18 @@ Esc	close popup / return to Normal
 ## Dashboards
 :dash ls	open the searchable dashboard picker
 :open [uid]	open a dashboard by uid (or retry the last picked)
-:dash save	save the loaded dashboard (last-write-wins)
+:w / :w!	save the loaded dashboard (PUT to server; `:w!` overwrites past version check)
 :dash rm <uid>	delete a dashboard by uid
 :dash new <name>	create a new empty dashboard
 :dashinfo / :di	toggle the dashboard summary overlay
 :grid / :solo	switch between grid and single-tile views
 :tile add / rm / mv / size / title	per-tile commands (see :h)
+:tile mv! <x> <y>	move with auto-shove (collisions cascade right/down)
+:tile size! <w> <h>	resize with auto-shove
+:tile yank [n] / cut [n]	capture / cut n tiles into the tile yank register
+:tile paste [n]	paste below focused; `:tile paste! [n]` pastes above
+:tile open <kind> [n]	open n new rows below focused; `:tile open! ...` above
+:tile undo	one-level dashboard undo (toggles with redo)
 
 ## Dashboard picker (`:dash ls`)
 type	filter as you type

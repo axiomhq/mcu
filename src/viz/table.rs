@@ -86,7 +86,7 @@ pub fn series_to_table(series: &[Series], hidden: &[bool], agg: Agg) -> TableRes
         let mut row: Vec<TableCell> = Vec::with_capacity(columns.len());
         for key in &tag_keys {
             match s.tags.iter().find(|(k, _)| k == key) {
-                Some((_, v)) => row.push(TableCell::Str(v.clone())),
+                Some((_, v)) => row.push(TableCell::Str(crate::chart::tag_text(v))),
                 None => row.push(TableCell::Null),
             }
         }

@@ -1,6 +1,7 @@
 //! Heatmap tile: 2D grid of binned tag-value × time cells coloured by
 //! aggregate, plus the colour palette + axis helpers it owns.
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 use ratatui::{
@@ -29,8 +30,12 @@ pub(super) fn heatmap_bin(
     x_bins: usize,
     y_bins: usize,
 ) -> HeatmapBinned {
-    // Bucket series by tag value.
-    let mut by_value: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    // Bucket series by tag value. `serde_json::Value` doesn't implement
+    // `Ord` (because `f64` lacks total ordering), so we wrap it in
+    // `TagKey` whose `Ord` impl uses `f64::total_cmp` for the numeric
+    // case — same technique as `ordered_float::OrderedFloat`, without
+    // pulling in the dep just for one map key.
+    let mut by_value: BTreeMap<TagKey, Vec<usize>> = BTreeMap::new();
     for (i, s) in series.iter().enumerate() {
         if hidden.get(i).copied().unwrap_or(false) {
             continue;
@@ -38,16 +43,22 @@ pub(super) fn heatmap_bin(
         let Some(v) = s.tags.iter().find(|(k, _)| k == by_tag).map(|(_, v)| v) else {
             continue;
         };
-        by_value.entry(v.clone()).or_default().push(i);
+        by_value.entry(TagKey(v.clone())).or_default().push(i);
     }
-    let mut y_keys: Vec<String> = by_value.keys().cloned().collect();
-    y_keys.truncate(y_bins);
+    // Take rows in tag-value order, capped at `y_bins`. Keep the raw
+    // key + index list paired so the binning loop below can iterate
+    // both in lock-step without re-looking-up.
+    let rows: Vec<(TagKey, Vec<usize>)> = by_value.into_iter().take(y_bins).collect();
+    let y_keys: Vec<String> = rows
+        .iter()
+        .map(|(k, _)| crate::chart::tag_text(&k.0))
+        .collect();
 
     // Global x range across the included series.
     let mut x_lo = f64::INFINITY;
     let mut x_hi = f64::NEG_INFINITY;
-    for key in &y_keys {
-        for i in &by_value[key] {
+    for (_, idxs) in &rows {
+        for i in idxs {
             for &(x, y) in &series[*i].points {
                 if x.is_finite() && y.is_finite() {
                     x_lo = x_lo.min(x);
@@ -64,10 +75,10 @@ pub(super) fn heatmap_bin(
     }
 
     // Sum + count per cell, then average at the end.
-    let mut sum = vec![vec![0.0_f64; x_bins]; y_keys.len()];
-    let mut cnt = vec![vec![0_u32; x_bins]; y_keys.len()];
-    for (yi, key) in y_keys.iter().enumerate() {
-        for i in &by_value[key] {
+    let mut sum = vec![vec![0.0_f64; x_bins]; rows.len()];
+    let mut cnt = vec![vec![0_u32; x_bins]; rows.len()];
+    for (yi, (_, idxs)) in rows.iter().enumerate() {
+        for i in idxs {
             for &(x, y) in &series[*i].points {
                 if !(x.is_finite() && y.is_finite()) {
                     continue;
@@ -87,9 +98,9 @@ pub(super) fn heatmap_bin(
         }
     }
 
-    let mut cells: Vec<Vec<Option<f64>>> = vec![vec![None; x_bins]; y_keys.len()];
+    let mut cells: Vec<Vec<Option<f64>>> = vec![vec![None; x_bins]; rows.len()];
     let (mut v_lo, mut v_hi) = (f64::INFINITY, f64::NEG_INFINITY);
-    for yi in 0..y_keys.len() {
+    for yi in 0..rows.len() {
         for xi in 0..x_bins {
             if cnt[yi][xi] > 0 {
                 let avg = sum[yi][xi] / cnt[yi][xi] as f64;
@@ -109,6 +120,57 @@ pub(super) fn heatmap_bin(
         } else {
             None
         },
+    }
+}
+
+/// Newtype around `serde_json::Value` that implements `Ord` so we can
+/// use tag values as `BTreeMap` keys. Variant ordering matches the
+/// natural "Null < Bool < Number < String < Array < Object" sequence;
+/// numeric comparison uses `f64::total_cmp` (i.e. the same total
+/// ordering `ordered_float::OrderedFloat` provides).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TagKey(serde_json::Value);
+
+impl TagKey {
+    fn rank(v: &serde_json::Value) -> u8 {
+        match v {
+            serde_json::Value::Null => 0,
+            serde_json::Value::Bool(_) => 1,
+            serde_json::Value::Number(_) => 2,
+            serde_json::Value::String(_) => 3,
+            serde_json::Value::Array(_) => 4,
+            serde_json::Value::Object(_) => 5,
+        }
+    }
+}
+
+impl PartialOrd for TagKey {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for TagKey {
+    fn cmp(&self, other: &Self) -> Ordering {
+        use serde_json::Value::*;
+        let (a, b) = (&self.0, &other.0);
+        match Self::rank(a).cmp(&Self::rank(b)) {
+            Ordering::Equal => match (a, b) {
+                (Null, Null) => Ordering::Equal,
+                (Bool(x), Bool(y)) => x.cmp(y),
+                (Number(x), Number(y)) => x
+                    .as_f64()
+                    .unwrap_or(0.0)
+                    .total_cmp(&y.as_f64().unwrap_or(0.0)),
+                (String(x), String(y)) => x.cmp(y),
+                // Arrays / objects fall back to their JSON encoding so
+                // they at least sort deterministically; in practice
+                // tag values are scalars.
+                (Array(_), Array(_)) | (Object(_), Object(_)) => a.to_string().cmp(&b.to_string()),
+                _ => Ordering::Equal,
+            },
+            other => other,
+        }
     }
 }
 

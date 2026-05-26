@@ -36,16 +36,8 @@ fn draw_time_preset_overlay(f: &mut Frame, app: &App, cursor: usize, screen: Rec
     let width = 36u16.min(screen.width.saturating_sub(4));
     // Borders (2) + title pad (1) + rows + hint (2).
     let height = (row_count + 5).min(screen.height.saturating_sub(2));
-    let title = format!(
-        " time · {} → {} ",
-        app.time_range.start, app.time_range.end
-    );
-    let inner = modal_frame(
-        f,
-        centered_area(screen, width, height),
-        &title,
-        Color::Cyan,
-    );
+    let title = format!(" time · {} → {} ", app.time.range.start, app.time.range.end);
+    let inner = modal_frame(f, centered_area(screen, width, height), &title, Color::Cyan);
     if inner.height < 3 {
         return;
     }

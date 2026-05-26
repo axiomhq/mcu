@@ -5,7 +5,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tokio::runtime::Handle;
 use tui_textarea::{CursorMove, TextArea};
 
-use crate::axiom::{Client as AxiomClient, DashboardSummary};
+use crate::axiom::{ChartKnownExt, Client as AxiomClient, DashboardSummary};
 use crate::cache::Cache;
 use crate::chart::Series;
 use crate::command::{self, Command, InsertAt, Motion, Operator, Step, Target};
@@ -20,24 +20,25 @@ use crate::params;
 use crate::share;
 use crate::viz;
 
+mod clipboard;
 mod completions_impl;
 mod dashboard;
+mod dashboard_cmd;
 mod editing;
-mod file_io;
-mod ex_cmds;
+pub(crate) mod ex_cmds;
 mod fetch;
-mod keys;
+mod file_io;
 mod helpers;
+mod keys;
 mod tile_layout;
+mod tile_ops_shove;
 mod types;
 
 // Re-export the items external modules / tests reach into via
 // `crate::app::*`. Internal helpers stay private and are pulled in
 // through `use` below.
 pub use tile_layout::{SpatialDir, build_dashboard_doc_from_buffer};
-pub(crate) use tile_layout::{
-    add_pick_kinds, pick_next_chart_in_direction, tile_ops,
-};
+pub(crate) use tile_layout::{add_pick_kinds, pick_next_chart_in_direction, tile_ops};
 pub use types::*;
 
 use helpers::*;
@@ -57,10 +58,6 @@ pub struct App {
     pub completions: CompletionState,
     pub quickfix: QuickFixPicker,
     pub cmdline: CmdLine,
-    /// Current cmdline completion popup state. `None` when no Tab has
-    /// been pressed since the cmdline opened (or since the last
-    /// non-Tab key reset it).
-    pub cmdline_completions: CmdlineCompletionState,
     /// Live diagnostics for the current buffer.
     /// Recomputed by [`App::recompute_diagnostics`] on every buffer-mutating key.
     pub diagnostics: Vec<mpl::Diagnostic>,
@@ -68,14 +65,9 @@ pub struct App {
     /// right of the status bar so users can correlate against server logs.
     /// `None` before the first run or when the response carried no trace.
     pub last_trace_id: Option<String>,
-    /// `true` while the help modal is on screen.
-    pub help_visible: bool,
-    /// Top row of the help modal that's currently visible. `0` puts
-    /// the first line of `docs/keys.md` at the top; increased by
-    /// j/Ctrl-d/G key handlers when the help modal is open so the
-    /// content (now sourced from a file and longer than a screen) is
-    /// scrollable instead of clipped.
-    pub help_scroll: u16,
+    /// Help modal state. Grouped because `visible` and `scroll` are
+    /// always touched together (open -> reset scroll; close -> reset both).
+    pub help: HelpState,
     /// Hover popup contents. `Some` when the user pressed `K` over a known
     /// stdlib function; any subsequent key dismisses it.
     pub hover: Option<hover::HoverInfo>,
@@ -100,49 +92,31 @@ pub struct App {
     visual_anchor: Option<usize>,
     /// Which pane currently consumes keystrokes.
     pub focus: Pane,
-    /// Index of the highlighted series in the legend (and the chart — the
-    /// selected series is drawn with a brighter marker when the legend is
-    /// focused so the user can see what they're about to toggle).
-    pub legend_selected: usize,
-    /// Per-series visibility flag, parallel to `series`. `true` means
-    /// hidden from the chart. Resized on every successful query.
-    pub legend_hidden: Vec<bool>,
-    /// `true` while a details modal for the selected legend entry is open.
-    pub legend_details_visible: bool,
-    /// Cursor row inside the details modal (index into
-    /// `series[legend_selected].tags`).
-    pub details_cursor: usize,
-    /// Tag keys, in selection order, that replace the auto-generated
-    /// series label in the legend. Empty = use `series.name` as before.
-    /// Reloaded from cache on every successful query (two-step fallback:
-    /// AST hash, then dataset+metric); user toggles persist back via
-    /// both keys so the next run remembers.
-    pub legend_label_tags: Vec<String>,
+    /// Legend pane state: which series is highlighted, which are hidden,
+    /// the details modal's open / cursor state, and the tag keys that
+    /// replace the auto-generated series label. Grouped because every
+    /// successful query reshapes the whole bundle (resize `hidden`,
+    /// clamp `selected`, reload `label_tags`).
+    pub legend: LegendState,
     /// Identifies the query whose results currently sit in `series`.
     /// `None` before the first query completes. Captured at query
     /// dispatch so toggles persist to the right cache keys even if the
     /// user has since edited the buffer.
     pub last_query_context: Option<QueryContext>,
-    /// Cursor row in the params pane. Index into the row list produced
-    /// by [`crate::mpl::param_rows`] for the current buffer + provided
-    /// values; clamped on every recompute so deletions don't dangle.
-    pub params_selected: usize,
-    /// When `Some`, the next time the command line is dismissed (either
-    /// via `Enter` or `Esc`) focus is restored to this pane. Set by
-    /// [`prefill_command`] so that `a`/`e` in the Params pane drop into
-    /// `:p` but return the user to Params after submit. `None` for
-    /// commands entered the normal way (`:` from Normal mode).
-    cmdline_return_focus: Option<Pane>,
+    /// Params pane state: cursor row + the merged system / cli param
+    /// dictionaries that drive `mpl::param_rows`. Grouped because
+    /// `system` and `cli` are always passed together to `mpl::analyze`,
+    /// `mpl::query_hash`, and `mpl::param_rows`, and `selected` is
+    /// reclamped after edits to either dict.
+    pub params: ParamsState,
+    // `cmdline_return_focus` folded into `cmdline.return_focus` (CmdLine).
+    // `cmdline_completions` folded into `cmdline.completions` (CmdLine).
     /// `true` after `Ctrl-w` has been seen; the next key is interpreted
     /// as a window/pane command.
     pending_ctrl_w: bool,
-    /// Host-supplied system parameters (e.g. `$__interval`). Substituted into
-    /// the query text before validation and before sending to the API.
-    pub system_params: Vec<params::SystemParam>,
-    /// User-declared `param $name: type;` values supplied via `-p NAME=VALUE`
-    /// on the command line. Sent verbatim to the server as `queryParams`;
-    /// the server typechecks against the buffer's declared params.
-    pub cli_params: std::collections::BTreeMap<String, String>,
+    // `system_params` -> `params.system`; `cli_params` -> `params.cli`
+    //  (see `params` field above).
+    //
     /// Path of the `.mpl` file currently being edited, if any. Set by `:e <path>`
     /// or the CLI argument; cleared when `:enew` (TODO) opens a fresh buffer.
     /// Searchable picker over the org's dashboards. Hidden by default;
@@ -159,9 +133,10 @@ pub struct App {
     /// Toggle for the `:dashinfo` overlay. Closes on `Esc` (handled in
     /// `on_key`) and toggles via the Ex-command.
     pub dashinfo_visible: bool,
-    /// `:time` overlay state. `Some(_)` while visible; the variant
-    /// distinguishes the preset list from the custom date picker.
-    pub time_picker: Option<TimePickerState>,
+    /// Time-range + `:time` picker state. Grouped because the picker
+    /// is the only writer to `range` and `range` is the picker's seed
+    /// on open — they're always touched together.
+    pub time: TimeState,
     /// When `Some`, an overlay shows the focused tile's raw chart
     /// JSON. Set by `:tile json` / `:tile inspect`; any key dismisses
     /// (handled in `on_key`).
@@ -188,6 +163,17 @@ pub struct App {
     pub dashboard_scroll: u16,
     /// Active tile editing sub-mode. `Idle` outside of `m`/`s`/`d`/`a`.
     pub tile_submode: TileSubMode,
+    /// Count + verb parser for the dashboard pane (vim-style `3y`,
+    /// `2x`, `5o` etc.). Only consumed in `TileSubMode::Idle`.
+    pub(super) dashboard_cmd: dashboard_cmd::DashboardParser,
+    /// Tile-level yank register, populated by `y` / `x`. Survives
+    /// navigation, view-mode flips, and dashboard swaps. Distinct
+    /// from `App.yank` (editor text register).
+    pub tile_yank: Option<Vec<TileSnapshot>>,
+    /// One-level dashboard undo. Set before every mutating
+    /// dashboard command; `u` swaps it with the current state so a
+    /// second `u` redoes — matches vim's single-slot undo toggle.
+    pub dashboard_undo: Option<DashboardSnapshot>,
     /// Set whenever a tile mutation touches `loaded_dashboard`.
     /// Cleared on `DashboardSaved` and on `write_file` in dashboard
     /// mode. Surfaced as `[+]` in the status line.
@@ -196,6 +182,14 @@ pub struct App {
     /// Populated by `run_tile_queries` after `adopt_dashboard`; read
     /// by the grid renderer to draw live data in each tile.
     pub tile_results: std::collections::BTreeMap<String, TileQueryResult>,
+    /// Monotonic counter bumped whenever the slate of in-flight tile
+    /// queries becomes irrelevant (dashboard swap, full-dashboard
+    /// refresh). Each spawned task captures the epoch at dispatch and
+    /// the handler drops events whose epoch doesn't match the current
+    /// one — prevents a slow result from dashboard A from resurrecting
+    /// or clobbering a tile in dashboard B that happens to share its
+    /// chart id (`c1`, `c2`, … are the typical defaults).
+    pub tile_query_epoch: u64,
     /// Snapshot of the editor buffer captured the last time
     /// `adopt_dashboard` seeded it from the focused chart. Used by the
     /// background dashboard-refresh path to decide whether re-adopting
@@ -216,12 +210,7 @@ pub struct App {
     /// Focused tile's `// @viz:opts` map (e.g. `n=10` for top-list).
     /// Same lifecycle as [`Self::viz_kind`].
     pub viz_opts: std::collections::BTreeMap<String, String>,
-    /// Active query time range, shared by every tile in the loaded
-    /// dashboard and by the editor's `:r` runs. Seeded from the
-    /// dashboard's `timeWindowStart` / `End` (or the legacy
-    /// `now-1h` / `now` defaults on file-mode startup) and mutated
-    /// in place by `:time` and the picker.
-    pub time_range: TimeRange,
+    // `time_range` moved to `time.range` (TimeState); see field above.
     /// Counter incremented on each query start; only matching responses are accepted.
     last_query_id: u64,
     runtime: Handle,
@@ -267,27 +256,32 @@ impl App {
             mode: Mode::Normal,
             editor,
             cmdline: CmdLine::default(),
-            cmdline_completions: CmdlineCompletionState::default(),
-            system_params: params::default_system_params(),
-            cli_params: std::collections::BTreeMap::new(),
+            params: ParamsState {
+                selected: 0,
+                system: params::default_system_params(),
+                cli: std::collections::BTreeMap::new(),
+            },
             current_file: None,
             saved_buffer: initial_text.clone(),
             viz_kind: initial_viz_kind,
             viz_opts: initial_viz_opts,
-            time_range: TimeRange::default(),
+            time: TimeState::default(),
             dashboards: DashboardPicker::default(),
             last_picked_dashboard: None,
             loaded_dashboard: None,
             dashinfo_visible: false,
-            time_picker: None,
             buffer_mode: BufferMode::Mpl,
             tile_inspect_json: None,
             view_mode: ViewMode::Solo,
             selected_chart_idx: 0,
             dashboard_scroll: 0,
             tile_submode: TileSubMode::Idle,
+            dashboard_cmd: dashboard_cmd::DashboardParser::new(),
+            tile_yank: None,
+            dashboard_undo: None,
             dashboard_dirty: false,
             tile_results: std::collections::BTreeMap::new(),
+            tile_query_epoch: 0,
             last_adopted_seed: None,
             last_error: None,
             series: demo_series(),
@@ -299,8 +293,7 @@ impl App {
             quickfix: QuickFixPicker::default(),
             diagnostics: Vec::new(),
             last_trace_id: None,
-            help_visible: false,
-            help_scroll: 0,
+            help: HelpState::default(),
             hover: None,
             sig_help: None,
             cmd_parser: command::Parser::new(),
@@ -309,14 +302,8 @@ impl App {
             last_change: None,
             visual_anchor: None,
             focus: Pane::Editor,
-            legend_selected: 0,
-            legend_hidden: Vec::new(),
-            legend_details_visible: false,
-            details_cursor: 0,
-            legend_label_tags: Vec::new(),
+            legend: LegendState::default(),
             last_query_context: None,
-            params_selected: 0,
-            cmdline_return_focus: None,
             pending_ctrl_w: false,
             last_query_id: 0,
             runtime,
@@ -337,7 +324,7 @@ impl App {
         self.loaded_dashboard
             .as_ref()
             .and_then(|r| r.dashboard.charts.get(self.selected_chart_idx))
-            .map(|c| c.base().id.clone())
+            .map(|c| c.known_base().id.clone())
     }
 
     /// Reload `legend_label_tags` from the cache for the current
@@ -355,12 +342,8 @@ impl App {
     fn reload_legend_label_tags(&mut self) {
         let tags = if self.view_mode == ViewMode::Grid
             && let Some(resource) = self.loaded_dashboard.as_ref()
-            && let Some(chart) = resource
-                .dashboard
-                .charts
-                .get(self.selected_chart_idx)
-            && let crate::dashboard::Query::Mpl(mpl) =
-                crate::dashboard::extract_query(chart)
+            && let Some(chart) = resource.dashboard.charts.get(self.selected_chart_idx)
+            && let crate::dashboard::Query::Mpl(mpl) = crate::dashboard::extract_query(chart)
             && let Ok((ds, m)) = crate::mpl::extract_dataset_metric(&mpl)
         {
             // Tile context: ignore the editor's query-hash store
@@ -377,7 +360,7 @@ impl App {
         } else {
             Vec::new()
         };
-        self.legend_label_tags = tags;
+        self.legend.label_tags = tags;
     }
 
     /// Series slice driving the legend pane right now: the focused
@@ -388,11 +371,8 @@ impl App {
     pub fn active_legend_series(&self) -> &[Series] {
         if self.view_mode == ViewMode::Grid
             && let Some(resource) = self.loaded_dashboard.as_ref()
-            && let Some(chart) = resource
-                .dashboard
-                .charts
-                .get(self.selected_chart_idx)
-            && let Some(tr) = self.tile_results.get(&chart.base().id)
+            && let Some(chart) = resource.dashboard.charts.get(self.selected_chart_idx)
+            && let Some(tr) = self.tile_results.get(&chart.known_base().id)
         {
             return &tr.series;
         }
@@ -403,51 +383,129 @@ impl App {
     /// Returns `None` when there's nothing selectable.
     fn active_legend_index(&self) -> Option<usize> {
         let n = self.active_legend_series().len();
-        if n == 0 { None } else { Some(self.legend_selected.min(n - 1)) }
+        if n == 0 {
+            None
+        } else {
+            Some(self.legend.selected.min(n - 1))
+        }
     }
 
-    /// Snapshot the selected tile's layout entry, synthesising a
-    /// default one if missing so sub-modes always have something to
-    /// revert to.
-    fn snapshot_selected_layout(&mut self) -> Option<crate::axiom::LayoutItem> {
+    /// Snapshot the entire layout vector and the focused tile's id.
+    /// Used by Move/Resize sub-modes so cascade shoves can be
+    /// previewed against a stable baseline and `Esc` can revert
+    /// every shoved tile in one shot.
+    ///
+    /// Synthesises a default `LayoutItem` for the focused tile if it
+    /// somehow has no layout entry, so the sub-mode always has
+    /// something to mutate.
+    fn snapshot_full_layout(&mut self) -> Option<(Vec<crate::axiom::LayoutItem>, String)> {
         let id = self.current_chart_id()?;
         let resource = self.loaded_dashboard.as_mut()?;
-        if let Some(li) = resource.dashboard.layout.iter().find(|l| l.i == id) {
-            return Some(li.clone());
+        if !resource.dashboard.layout.iter().any(|l| l.i == id) {
+            resource.dashboard.layout.push(crate::axiom::LayoutItem {
+                i: id.clone(),
+                x: 0,
+                y: Some(0),
+                w: 6,
+                h: 6,
+                extras: Default::default(),
+            });
         }
-        // Synthesize and append so subsequent edits have something to
-        // mutate.
-        let li = crate::axiom::LayoutItem {
-            i: id,
-            x: 0,
-            y: Some(0),
-            w: 6,
-            h: 6,
-            extras: Default::default(),
-        };
-        resource.dashboard.layout.push(li.clone());
-        Some(li)
+        Some((resource.dashboard.layout.clone(), id))
     }
 
-    fn revert_layout(&mut self, original: crate::axiom::LayoutItem) {
-        if let Some(resource) = self.loaded_dashboard.as_mut()
-            && let Some(li) = resource
-                .dashboard
-                .layout
-                .iter_mut()
-                .find(|l| l.i == original.i)
-        {
-            *li = original;
+    /// Restore the entire layout vector. Cheap: a single move of
+    /// the `Vec<LayoutItem>` plus a status update.
+    fn revert_full_layout(&mut self, original: Vec<crate::axiom::LayoutItem>) {
+        if let Some(resource) = self.loaded_dashboard.as_mut() {
+            resource.dashboard.layout = original;
         }
         self.tile_submode = TileSubMode::Idle;
         self.status = "reverted".to_string();
+    }
+
+    /// Preview a Move sub-mode delta: clone `original_layout`, run
+    /// the auto-shove, and replace the dashboard's layout iff the
+    /// shove succeeded. On failure the visible layout stays at the
+    /// last successful preview (matching how vim leaves the buffer
+    /// at the last accepted state after a rejected motion) and the
+    /// stored `(dx, dy)` is *not* advanced — the next arrow key
+    /// retries from the same baseline.
+    fn try_apply_move_preview(
+        &mut self,
+        original_layout: &[crate::axiom::LayoutItem],
+        original_id: &str,
+        ndx: i32,
+        ndy: i32,
+    ) {
+        let mut candidate = original_layout.to_vec();
+        match crate::app::tile_ops_shove::shove_move(&mut candidate, original_id, ndx, ndy) {
+            Ok(outcome) => {
+                if let Some(resource) = self.loaded_dashboard.as_mut() {
+                    resource.dashboard.layout = candidate;
+                }
+                self.dashboard_dirty = true;
+                self.tile_submode = TileSubMode::Move {
+                    original_layout: original_layout.to_vec(),
+                    original_id: original_id.to_string(),
+                    dx: ndx,
+                    dy: ndy,
+                };
+                // Only report cascade detail when something other than
+                // the moved tile shifted, to keep the status quiet
+                // for the common single-tile case.
+                let extras = outcome.moved.len().saturating_sub(1);
+                self.status = match (extras, outcome.new_rows) {
+                    (0, 0) => String::new(),
+                    (n, 0) => format!("move ok: {n} tile(s) shoved"),
+                    (n, r) => format!("move ok: {n} tile(s) shoved, +{r} row(s)"),
+                };
+            }
+            Err(reason) => {
+                self.status = format!("move blocked: {reason}");
+            }
+        }
+    }
+
+    /// Resize counterpart to [`Self::try_apply_move_preview`].
+    fn try_apply_resize_preview(
+        &mut self,
+        original_layout: &[crate::axiom::LayoutItem],
+        original_id: &str,
+        ndw: i32,
+        ndh: i32,
+    ) {
+        let mut candidate = original_layout.to_vec();
+        match crate::app::tile_ops_shove::shove_resize(&mut candidate, original_id, ndw, ndh) {
+            Ok(outcome) => {
+                if let Some(resource) = self.loaded_dashboard.as_mut() {
+                    resource.dashboard.layout = candidate;
+                }
+                self.dashboard_dirty = true;
+                self.tile_submode = TileSubMode::Resize {
+                    original_layout: original_layout.to_vec(),
+                    original_id: original_id.to_string(),
+                    dw: ndw,
+                    dh: ndh,
+                };
+                let extras = outcome.moved.len().saturating_sub(1);
+                self.status = match (extras, outcome.new_rows) {
+                    (0, 0) => String::new(),
+                    (n, 0) => format!("resize ok: {n} tile(s) shoved"),
+                    (n, r) => format!("resize ok: {n} tile(s) shoved, +{r} row(s)"),
+                };
+            }
+            Err(reason) => {
+                self.status = format!("resize blocked: {reason}");
+            }
+        }
     }
 
     /// Recompute the params pane's row list for the current buffer +
     /// `cli_params`. Cheap; mirrors the diagnostics-on-every-keystroke
     /// pattern.
     pub fn param_rows(&self) -> Vec<crate::params::ParamRow> {
-        crate::mpl::param_rows(&self.query_text(), &self.system_params, &self.cli_params)
+        crate::mpl::param_rows(&self.query_text(), &self.params.system, &self.params.cli)
     }
 
     /// Write the current `legend_label_tags` to the cache and flush
@@ -464,24 +522,22 @@ impl App {
     fn persist_legend_label_tags(&self) {
         if self.view_mode == ViewMode::Grid
             && let Some(resource) = self.loaded_dashboard.as_ref()
-            && let Some(chart) = resource
-                .dashboard
-                .charts
-                .get(self.selected_chart_idx)
-            && let crate::dashboard::Query::Mpl(mpl) =
-                crate::dashboard::extract_query(chart)
+            && let Some(chart) = resource.dashboard.charts.get(self.selected_chart_idx)
+            && let crate::dashboard::Query::Mpl(mpl) = crate::dashboard::extract_query(chart)
             && let Ok((ds, m)) = crate::mpl::extract_dataset_metric(&mpl)
         {
-            let tags = self.legend_label_tags.clone();
+            let tags = self.legend.label_tags.clone();
             cache_save_with(&self.cache, |c| c.set_legend_tags_for_metric(&ds, &m, tags));
             return;
         }
-        let Some(ctx) = &self.last_query_context else { return };
+        let Some(ctx) = &self.last_query_context else {
+            return;
+        };
         let (h, d, m, tags) = (
             ctx.hash.clone(),
             ctx.dataset.clone(),
             ctx.metric.clone(),
-            self.legend_label_tags.clone(),
+            self.legend.label_tags.clone(),
         );
         cache_save_with(&self.cache, |c| c.set_legend_tags(&h, &d, &m, tags));
     }
@@ -491,8 +547,8 @@ impl App {
     /// Single entry point so the reset can't be forgotten by ad-hoc
     /// callers.
     fn open_help(&mut self) {
-        self.help_visible = true;
-        self.help_scroll = 0;
+        self.help.visible = true;
+        self.help.scroll = 0;
     }
 
     /// `true` when the editor buffer has unsaved changes compared to the last
@@ -532,7 +588,7 @@ impl App {
         }
         let text = self.query_text();
         if let Err(e) = self.cache.read().unwrap().save_query(&text) {
-            eprintln!("metrics-tui: query cache save failed: {e}");
+            eprintln!("mcu: query cache save failed: {e}");
         }
     }
 
@@ -552,8 +608,8 @@ impl App {
     }
 
     fn bootstrap_inner(&mut self, run_initial_query: bool) {
-        if !self.cli_params.is_empty() {
-            let n = self.cli_params.len();
+        if !self.params.cli.is_empty() {
+            let n = self.params.cli.len();
             let plural = if n == 1 { "param" } else { "params" };
             self.status = format!("{}; {n} CLI {plural}", self.status);
         }
@@ -572,7 +628,7 @@ impl App {
     /// profile.
     pub fn recompute_diagnostics(&mut self) {
         let text = self.query_text();
-        self.diagnostics = mpl::analyze(&text, &self.system_params);
+        self.diagnostics = mpl::analyze(&text, &self.params.system);
         self.sync_dashboard_from_buffer(&text);
         self.recompute_sig_help();
     }

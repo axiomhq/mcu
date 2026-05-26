@@ -10,10 +10,11 @@
 use std::collections::BTreeMap;
 
 use crate::axiom::{
-    DashboardSummary, DatasetSummary, MetricInfo, MetricsQueryResponse,
+    DashboardSummary, DashboardSummaryExt, DatasetSummary, MetricInfo, MetricsQueryResponse,
 };
 use crate::chart::Series;
 use crate::completions;
+use crate::dashboard::TimeRange;
 use crate::mpl;
 
 pub enum AppEvent {
@@ -62,9 +63,12 @@ pub enum AppEvent {
     /// Result of a single per-tile MPL query, kicked off in parallel
     /// when a dashboard is adopted in Grid view. `chart_id` is the
     /// wire chart id (`ChartBase.id`); the handler stores the result
-    /// in `App.tile_results` under that key.
+    /// in `App.tile_results` under that key, but only when `epoch`
+    /// matches `App.tile_query_epoch` — stale results from a
+    /// superseded dashboard load are dropped on arrival.
     TileQueryFinished {
         chart_id: String,
+        epoch: u64,
         result: anyhow::Result<MetricsQueryResponse>,
     },
     /// Background refresh of the org's dashboard list. Fires after a
@@ -133,6 +137,57 @@ pub enum TimePickerState {
     Custom(CustomRangePicker),
 }
 
+/// Help-modal state. `visible` toggles the overlay; `scroll` is the top
+/// row of `docs/keys.md` currently visible (j / Ctrl-d / G adjust it).
+/// Grouped because every consumer touches both fields together.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct HelpState {
+    pub visible: bool,
+    pub scroll: u16,
+}
+
+/// Legend pane state. Every field is reshaped together on each new
+/// query: `hidden` is resized to match the new series count;
+/// `selected` is clamped if the series count shrank; `label_tags`
+/// is reloaded from cache (AST-hash, then dataset+metric fallback);
+/// `details_visible` and `details_cursor` are reset when the user
+/// closes the details modal.
+#[derive(Debug, Default, Clone)]
+pub struct LegendState {
+    pub selected: usize,
+    pub hidden: Vec<bool>,
+    pub details_visible: bool,
+    pub details_cursor: usize,
+    pub label_tags: Vec<String>,
+    /// Vim `gg` is two presses: the first sets this flag, the second
+    /// (also `g`) actually jumps to the first line. Any other key
+    /// clears the flag. Shared between the legend pane and its
+    /// details modal, both of which use the same handler shape.
+    pub pending_g: bool,
+}
+
+/// Params pane state. `selected` is the cursor row over rows produced
+/// by `mpl::param_rows`; clamped after edits. `system` holds host-
+/// supplied values (`$__interval` etc.). `cli` holds `-p NAME=VALUE`
+/// arguments. The two dicts are always passed together to MPL routines.
+#[derive(Debug, Default, Clone)]
+pub struct ParamsState {
+    pub selected: usize,
+    pub system: Vec<crate::params::SystemParam>,
+    pub cli: BTreeMap<String, String>,
+}
+
+/// Time-range + `:time` picker state. `picker` is `Some` while the
+/// overlay is open; the variant inside distinguishes preset-list mode
+/// from custom-date mode. `range` is the active query window, used by
+/// every tile and the editor's `:r` runs. Mutated by the picker on
+/// apply and by [`crate::app::App::adopt_dashboard`] on dashboard load.
+#[derive(Debug, Default, Clone)]
+pub struct TimeState {
+    pub picker: Option<TimePickerState>,
+    pub range: TimeRange,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CustomField {
     Start,
@@ -155,9 +210,7 @@ impl CustomRangePicker {
     /// meaningful starting window even before they touch the cursor.
     pub fn seed() -> Self {
         let today = time::OffsetDateTime::now_utc().date();
-        let yesterday = today
-            .checked_sub(time::Duration::days(1))
-            .unwrap_or(today);
+        let yesterday = today.checked_sub(time::Duration::days(1)).unwrap_or(today);
         Self {
             start: yesterday,
             end: today,
@@ -219,10 +272,7 @@ impl CustomRangePicker {
         } else {
             (self.start, self.end)
         };
-        (
-            format!("{lo}T00:00:00Z"),
-            format!("{hi}T23:59:59Z"),
-        )
+        (format!("{lo}T00:00:00Z"), format!("{hi}T23:59:59Z"))
     }
 }
 
@@ -314,30 +364,86 @@ pub enum ViewMode {
 /// `Idle` is the default — arrow keys navigate selection. Any of
 /// `m` / `s` / `d` / `a` enters a sub-mode where the keymap changes:
 ///
-/// * `Move{original}` — arrow keys nudge the selected tile by one
-///   virtual-grid cell. `Enter` commits; `Esc` restores `original`.
-///   Mutations that would overlap another tile are rejected.
-/// * `Resize{original}` — Right/Down grow `w`/`h`; Left/Up shrink
-///   (clamped to a 1-cell minimum and 12-col width).
+/// * `Move { original_layout, dx, dy }` — arrow keys accumulate a
+///   delta. On every change the previewed layout is recomputed from
+///   `original_layout + (dx, dy)` via [`super::tile_ops_shove::shove_move`],
+///   so move-right-then-left correctly *undoes* an earlier shove
+///   instead of leaving stranded victims. `Enter` commits the current
+///   preview; `Esc` restores `original_layout` wholesale.
+/// * `Resize { original_layout, dw, dh }` — same accumulator model
+///   for resize via [`super::tile_ops_shove::shove_resize`]. Right/Down
+///   grow `w`/`h`; Left/Up shrink (clamped to a 1-cell minimum and
+///   12-col width).
 /// * `ConfirmDelete` — `y` removes the selected tile; any other key
 ///   cancels. No keyboard accelerator can fire by accident here.
-/// * `AddPick{cursor}` — kind-picker overlay; arrow keys move the
-///   cursor across the implemented `VizKind`s and `Enter` inserts a
-///   new tile at the first free grid slot.
+/// * `PickViz{cursor, action}` — viz-kind picker overlay shared by `a`
+///   (add) and `o`/`O` (open new row); arrow keys move the cursor
+///   across the implemented `VizKind`s and `Enter` commits via the
+///   `action`-specific code path.
 #[derive(Debug, Clone, Default)]
 pub enum TileSubMode {
     #[default]
     Idle,
     Move {
-        original: crate::axiom::LayoutItem,
+        original_layout: Vec<crate::axiom::LayoutItem>,
+        original_id: String,
+        dx: i32,
+        dy: i32,
     },
     Resize {
-        original: crate::axiom::LayoutItem,
+        original_layout: Vec<crate::axiom::LayoutItem>,
+        original_id: String,
+        dw: i32,
+        dh: i32,
     },
     ConfirmDelete,
-    AddPick {
+    /// Modal viz-kind picker. Used by both `a` (add tile at first
+    /// free slot) and `o`/`O` (open a new row with a tile). The
+    /// `action` carries the commit-time behaviour so the same
+    /// keymap + overlay covers both.
+    PickViz {
         cursor: usize,
+        action: PickVizAction,
     },
+}
+
+/// Commit behaviour for [`TileSubMode::PickViz`].
+#[derive(Debug, Clone, Copy)]
+pub enum PickVizAction {
+    /// `a` — insert a tile of the chosen kind at the first free
+    /// grid slot.
+    Add,
+    /// `o`/`O` — open `remaining` new rows above/below the focused
+    /// tile, each with a tile of the chosen kind. `5o` only prompts
+    /// once; subsequent rows reuse the picked kind.
+    Open { above: bool, remaining: usize },
+}
+
+/// A single tile captured by `y` / `x` for later paste. Stored in
+/// `App.tile_yank`; survives navigation, view-mode flips and
+/// dashboard swaps (vim's unnamed register behaves the same way
+/// across buffers).
+#[derive(Debug, Clone)]
+pub struct TileSnapshot {
+    /// Full chart (cloned). Id is rewritten on paste so multiple
+    /// pastes don't collide.
+    pub chart: crate::axiom::Chart,
+    /// Layout entry as captured. Absolute coords; the paste path
+    /// translates the bounding box to its new origin so multi-tile
+    /// shapes round-trip exactly.
+    pub layout: crate::axiom::LayoutItem,
+}
+
+/// One-level dashboard undo slot. Captured at the start of every
+/// mutating dashboard command (move/resize commit, yank, cut, paste,
+/// open, `:tile ...`). `u` swaps this with the live dashboard, so a
+/// second `u` redoes the change — vim's `u` toggle.
+#[derive(Debug, Clone)]
+pub struct DashboardSnapshot {
+    pub charts: Vec<crate::axiom::Chart>,
+    pub layout: Vec<crate::axiom::LayoutItem>,
+    pub selected_idx: usize,
+    pub dirty: bool,
 }
 
 /// The (hash, dataset, metric) triple identifying the query whose results
@@ -350,13 +456,23 @@ pub struct QueryContext {
     pub metric: String,
 }
 
-/// Buffer + cursor for the `:` command line.
+/// `:` command-line state: the line buffer + cursor, the Tab-completion
+/// popup, and the pane to restore focus to on dismiss. Folded into a
+/// single struct because opening / typing / dismissing the line is the
+/// natural transaction boundary — all three fields are touched together.
 #[derive(Default, Debug, Clone)]
 pub struct CmdLine {
     /// Text after the `:` prompt, without the prompt itself.
     pub buf: String,
     /// Cursor position in `buf`, measured in chars (not bytes).
     pub cursor: usize,
+    /// Tab-completion popup state. Cleared on cmdline dismiss.
+    pub completions: CmdlineCompletionState,
+    /// When `Some`, the pane to restore focus to when the line
+    /// closes. Used by `prefill_command` so `a`/`e` from the Params
+    /// pane returns there after submit. `None` for `:` entered from
+    /// Normal mode.
+    pub return_focus: Option<Pane>,
 }
 
 impl CmdLine {
@@ -457,7 +573,7 @@ impl CompletionState {
 /// State for the `:` cmdline tab-completion popup. Lives on `App` so
 /// the UI can read it without re-running the completer every frame,
 /// and so successive Tabs cycle deterministically through the list.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct CmdlineCompletionState {
     pub visible: bool,
     pub items: Vec<String>,
@@ -527,7 +643,7 @@ impl DashboardPicker {
 
     pub fn open(&mut self, items: Vec<DashboardSummary>) {
         let mut sorted = items;
-        sorted.sort_by_key(|a| a.name().to_lowercase());
+        sorted.sort_by_key(|a| a.name_or_unnamed().to_lowercase());
         self.items = sorted;
         self.filter.clear();
         self.cursor = 0;
@@ -541,7 +657,7 @@ impl DashboardPicker {
     pub fn refresh_items(&mut self, items: Vec<DashboardSummary>) {
         let selected_uid = self.selected().map(|d| d.uid.clone());
         let mut sorted = items;
-        sorted.sort_by_key(|a| a.name().to_lowercase());
+        sorted.sort_by_key(|a| a.name_or_unnamed().to_lowercase());
         self.items = sorted;
         let n = self.filtered_indices().len();
         if n == 0 {
@@ -574,7 +690,7 @@ impl DashboardPicker {
             .iter()
             .enumerate()
             .filter(|(_, d)| {
-                d.name().to_lowercase().contains(&needle)
+                d.name_or_unnamed().to_lowercase().contains(&needle)
                     || d.description()
                         .map(|s| s.to_lowercase().contains(&needle))
                         .unwrap_or(false)
@@ -629,4 +745,3 @@ pub struct YankEntry {
     pub text: String,
     pub linewise: bool,
 }
-

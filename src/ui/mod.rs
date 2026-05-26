@@ -25,6 +25,7 @@ use ratatui::{
 };
 
 use crate::app::App;
+use crate::axiom::ChartKnownExt;
 use crate::chart;
 use crate::viz;
 
@@ -149,7 +150,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(f.area());
 
-    let bottom_h = capped(root[0].height, BOTTOM_ROW_PCT, BOTTOM_ROW_MIN, BOTTOM_ROW_MAX);
+    let bottom_h = capped(
+        root[0].height,
+        BOTTOM_ROW_PCT,
+        BOTTOM_ROW_MIN,
+        BOTTOM_ROW_MAX,
+    );
     let body = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(bottom_h)])
@@ -163,7 +169,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     let legend_focused = app.focus == crate::app::Pane::Legend;
     let selected_for_graph = if legend_focused {
-        Some(app.legend_selected)
+        Some(app.legend.selected)
     } else {
         None
     };
@@ -181,7 +187,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             f,
             viz_kind,
             &app.series,
-            &app.legend_hidden,
+            &app.legend.hidden,
             selected_for_graph,
             &viz_opts,
             &viz_body,
@@ -202,23 +208,24 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         String,
     ) = if app.view_mode == crate::app::ViewMode::Grid
         && let Some(resource) = app.loaded_dashboard.as_ref()
-        && let Some(chart) = resource
-            .dashboard
-            .charts
-            .get(app.selected_chart_idx)
+        && let Some(chart) = resource.dashboard.charts.get(app.selected_chart_idx)
     {
         let label = chart
-            .base()
+            .known_base()
             .name
             .clone()
-            .unwrap_or_else(|| chart.base().id.clone());
+            .unwrap_or_else(|| chart.known_base().id.clone());
         let series_slice: &[crate::chart::Series] = app
             .tile_results
-            .get(&chart.base().id)
+            .get(&chart.known_base().id)
             .map(|t| t.series.as_slice())
             .unwrap_or(&[]);
         let n = series_slice.len();
-        let selected = if n == 0 { 0 } else { app.legend_selected.min(n - 1) };
+        let selected = if n == 0 {
+            0
+        } else {
+            app.legend.selected.min(n - 1)
+        };
         (
             series_slice,
             Some(vec![false; n]),
@@ -229,18 +236,18 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         (
             app.series.as_slice(),
             None,
-            app.legend_selected,
+            app.legend.selected,
             "legend".to_string(),
         )
     };
     let legend_hidden_slice: &[bool] = match legend_hidden_owned.as_ref() {
         Some(v) => v.as_slice(),
-        None => app.legend_hidden.as_slice(),
+        None => app.legend.hidden.as_slice(),
     };
     chart::draw_legend(
         f,
         legend_series,
-        &app.legend_label_tags,
+        &app.legend.label_tags,
         legend_hidden_slice,
         legend_selected_for_render,
         legend_focused,
@@ -269,15 +276,15 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         popups::draw_quickfix_popup(f, app, editor_area);
     }
 
-    if app.help_visible {
-        help::draw_help_modal(f, app.help_scroll, top[0]);
+    if app.help.visible {
+        help::draw_help_modal(f, app.help.scroll, top[0]);
     }
 
     if app.hover.is_some() {
         hover::draw_hover_popup(f, app, editor_area);
     }
 
-    if app.legend_details_visible {
+    if app.legend.details_visible {
         overlays::draw_legend_details(f, app, top[0]);
     }
 
@@ -293,15 +300,15 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         overlays::draw_dashinfo_overlay(f, resource, f.area());
     }
 
-    // Tile add-picker overlay: shown when `tile_submode == AddPick`.
-    if let crate::app::TileSubMode::AddPick { cursor } = &app.tile_submode {
-        overlays::draw_add_pick_overlay(f, *cursor, f.area());
+    // Viz-kind picker overlay — shared by `a` (add) and `o`/`O` (open).
+    if let crate::app::TileSubMode::PickViz { cursor, action } = &app.tile_submode {
+        overlays::draw_pick_viz_overlay(f, *cursor, *action, f.area());
     }
 
     // `:time` overlay: presets list, or two-month calendar picker for
     // the Custom variant. Drawn above tile overlays so its key handler
     // (which owns the modal input) is what the user sees.
-    if let Some(state) = app.time_picker.as_ref() {
+    if let Some(state) = app.time.picker.as_ref() {
         time_picker::draw_time_picker_overlay(f, app, state, f.area());
     }
 

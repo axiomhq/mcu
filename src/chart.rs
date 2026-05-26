@@ -4,7 +4,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     symbols,
     text::{Line, Span},
-    widgets::{Axis, Block, Chart, Dataset, GraphType, List, ListItem, Paragraph},
+    widgets::{Axis, Block, Chart, Dataset, GraphType, List, ListItem, ListState, Paragraph},
 };
 
 use crate::dashboard::VizKind;
@@ -13,9 +13,21 @@ use crate::dashboard::VizKind;
 #[derive(Clone, Debug)]
 pub struct Series {
     pub name: String,
-    pub tags: Vec<(String, String)>,
+    /// Tag bindings on this series. Values keep their wire JSON type;
+    /// use [`tag_text`] to format them for the UI — `Value::Display`
+    /// is JSON encoding so strings come back quoted.
+    pub tags: Vec<(String, serde_json::Value)>,
     pub points: Vec<(f64, f64)>,
     pub color: Color,
+}
+
+/// Plain-text view of a tag value: unwrap `Value::String` directly so
+/// the surrounding JSON quotes are gone; let `Display` handle every
+/// other variant (numbers, booleans, arrays render naturally).
+pub fn tag_text(v: &serde_json::Value) -> String {
+    v.as_str()
+        .map(String::from)
+        .unwrap_or_else(|| v.to_string())
 }
 
 /// Stable color palette used to assign colors to series in order.
@@ -321,7 +333,7 @@ pub fn summarize_legend(series: &[Series], picked: &[String]) -> LegendSummary {
                         s.tags
                             .iter()
                             .find(|(tk, _)| tk == k)
-                            .map(|(_, v)| v.clone())
+                            .map(|(_, v)| tag_text(v))
                     })
                     .collect();
                 if vals.is_empty() {
@@ -339,7 +351,7 @@ pub fn summarize_legend(series: &[Series], picked: &[String]) -> LegendSummary {
 
     // Auto mode: also lift tag (k, v) pairs that are identical across
     // every series — they're noise on per-row labels.
-    let shared_tags: Vec<(String, String)> = series[0]
+    let shared_tags: Vec<(String, serde_json::Value)> = series[0]
         .tags
         .iter()
         .filter(|(k, v)| {
@@ -357,7 +369,7 @@ pub fn summarize_legend(series: &[Series], picked: &[String]) -> LegendSummary {
     if !shared_tags.is_empty() {
         let joined = shared_tags
             .iter()
-            .map(|(k, v)| format!("{k}={v}"))
+            .map(|(k, v)| format!("{k}={}", tag_text(v)))
             .collect::<Vec<_>>()
             .join(", ");
         header_parts.push(format!("{{{joined}}}"));
@@ -370,10 +382,8 @@ pub fn summarize_legend(series: &[Series], picked: &[String]) -> LegendSummary {
             let differing: Vec<String> = s
                 .tags
                 .iter()
-                .filter(|(k, v)| {
-                    !shared_tags.iter().any(|(sk, sv)| sk == k && sv == v)
-                })
-                .map(|(k, v)| format!("{k}={v}"))
+                .filter(|(k, v)| !shared_tags.iter().any(|(sk, sv)| sk == k && sv == v))
+                .map(|(k, v)| format!("{k}={}", tag_text(v)))
                 .collect();
             if differing.is_empty() {
                 // No distinguishing tags — the colour bullet alone
@@ -491,7 +501,15 @@ pub fn draw_legend(
         })
         .collect();
 
-    f.render_widget(List::new(items), list_area);
+    // Render as a stateful list so ratatui auto-adjusts the scroll
+    // offset to keep `selected` in view. We rebuild the state every
+    // frame from `selected` — the offset is purely a function of
+    // the cursor and viewport height, so there's nothing to persist.
+    let mut list_state = ListState::default();
+    if !series.is_empty() {
+        list_state.select(Some(selected.min(series.len() - 1)));
+    }
+    f.render_stateful_widget(List::new(items), list_area, &mut list_state);
 }
 
 #[cfg(test)]
