@@ -4,6 +4,8 @@ A terminal interface for querying [Axiom](https://axiom.co). You write
 MPL in a vim-style editor, charts render alongside, and you can browse
 or edit Axiom dashboards inline.
 
+![mcu dashboard view](docs/dashboard.png)
+
 It uses the same `~/.axiom.toml` config file as the official Axiom
 CLI, so if you've already authenticated there, you're done.
 
@@ -71,18 +73,26 @@ The chart kind is picked by a comment at the top of the buffer:
 ```
 
 Change `line` to `bar`, `area`, `scatter`, `pie`, `heatmap`, `table`,
-`top_list`, `statistic`, or `note` to switch chart kinds without
-touching the query.
+`top_list`, `statistic`, `log_stream`, `monitor_list`, `note`, or
+`spacer` to switch chart kinds without touching the query.
 
 ### Dashboards
 
 `:dash ls` opens a searchable picker over every dashboard in your
-workspace. Pick one and you land in a grid view; press Enter on a
-tile to zoom into a single chart with the editor showing its query.
+workspace. Pick one and you land in a grid view; the editor binds
+to the focused tile so navigating with `Tab` / `hjkl` swaps which
+query you're editing. Press Enter on a tile to zoom into it.
+
 Edits save back to Axiom — change the query, move tiles around with
-`m`/`s` (auto-shove cascades) or `:tile mv!` / `:tile size!`, then
-`:w` (refuses if someone else bumped the version) or `:w!` to
-overwrite.
+`m`/`s` (auto-shove cascades neighbours; shrinking pulls lower tiles
+up) or `:tile mv!` / `:tile size!`, then `:w` (refuses if someone
+else bumped the version) or `:w!` to overwrite. `:wq` waits for the
+async save to land before quitting.
+
+The dashboard pane is also vim-flavoured at the tile level: `y` /
+`x` / `p` yank, cut, and paste tiles (block-shape preserved); `u`
+is a one-level undo; `a` adds a new tile; `d` deletes with confirm.
+Counts work (`3y`, `2x`).
 
 ### Time range
 
