@@ -96,9 +96,63 @@ fn classify_rate_families() {
 
 #[test]
 fn classify_unknown_families_fall_through_to_other() {
-    // Valid UCUM, but not in our families.
+    // Valid UCUM, but intentionally not in our scaling families:
+    // offset temperatures must not become kCel or mCel.
     assert_eq!(parse("Cel").unwrap().family(), UnitFamily::Other);
-    assert_eq!(parse("mol").unwrap().family(), UnitFamily::Other);
+}
+
+#[test]
+fn classify_si_decimal_engineering_units() {
+    for (raw, base) in [
+        ("W", SiBase::Watt),
+        ("kW", SiBase::Watt),
+        ("mW", SiBase::Watt),
+        ("V", SiBase::Volt),
+        ("A", SiBase::Ampere),
+        ("J", SiBase::Joule),
+        ("Pa", SiBase::Pascal),
+        ("m", SiBase::Metre),
+        ("km", SiBase::Metre),
+        ("g", SiBase::Gram),
+        ("kg", SiBase::Gram),
+        ("L", SiBase::Litre),
+        ("lx", SiBase::Lux),
+        ("klx", SiBase::Lux),
+        ("lm", SiBase::Lumen),
+        ("mol", SiBase::Mole),
+    ] {
+        assert_eq!(
+            parse(raw).unwrap().family(),
+            UnitFamily::SiDecimal(base),
+            "expected SI decimal family for {raw:?}"
+        );
+    }
+}
+
+#[test]
+fn classify_mass_concentration_normalizes_friendly_cubic_metres() {
+    for raw in ["ug/m3", "µg/m3", "μg/m3", "µg/m³", "mg/m3", "kg/m3"] {
+        let u = parse(raw).unwrap_or_else(|| panic!("{raw:?} should parse"));
+        assert_eq!(u.family(), UnitFamily::MassConcentration, "{raw:?}");
+    }
+    assert_eq!(parse("µg/m³").unwrap().raw(), "µg/m3");
+}
+
+#[test]
+fn classify_currency_extensions() {
+    for (raw, currency) in [
+        ("EUR", iso_currency::Currency::EUR),
+        ("USD", iso_currency::Currency::USD),
+        ("GBP", iso_currency::Currency::GBP),
+        ("JPY", iso_currency::Currency::JPY),
+        ("CHF", iso_currency::Currency::CHF),
+    ] {
+        assert_eq!(
+            parse(raw).unwrap().family(),
+            UnitFamily::Currency(currency),
+            "expected Currency for {raw:?}"
+        );
+    }
 }
 
 // ---------- scale_for: bytes binary ----------------------------------
@@ -200,6 +254,137 @@ fn scale_frequency_promotes_hz_to_ghz() {
     let s = scale_for(Some(&u), 0.0, 2.5e9);
     assert_eq!(s.suffix, " GHz");
     assert!((2.5e9 * s.factor - 2.5).abs() < 1e-3);
+}
+
+// ---------- scale_for: byte/bit rates --------------------------------
+
+#[test]
+fn scale_byte_rate_picks_mib_per_second_by_magnitude() {
+    let u = parse("By/s").unwrap();
+    let s = scale_for(Some(&u), 0.0, 2_621_440.0);
+    assert_eq!(s.suffix, " MiB/s");
+    assert!((2_621_440.0 * s.factor - 2.5).abs() < 1e-9);
+}
+
+#[test]
+fn scale_byte_rate_respects_input_denominator() {
+    let u = parse("MiBy/min").unwrap();
+    // 120 MiBy/min = 2 MiB/s. Values arrive in input units, so the
+    // raw magnitude is 120.
+    let s = scale_for(Some(&u), 0.0, 120.0);
+    assert_eq!(s.suffix, " MiB/s");
+    assert!((120.0 * s.factor - 2.0).abs() < 1e-9);
+}
+
+#[test]
+fn scale_bit_rate_picks_mbit_per_second_by_magnitude() {
+    let u = parse("bit/s").unwrap();
+    let s = scale_for(Some(&u), 0.0, 2_500_000.0);
+    assert_eq!(s.suffix, " Mibit/s");
+    assert!((2_500_000.0 * s.factor - 2.384_185_791).abs() < 1e-6);
+}
+
+// ---------- scale_for: SI decimal ------------------------------------
+
+#[test]
+fn scale_si_decimal_power_promotes_watts_to_kw() {
+    let u = parse("W").unwrap();
+    let s = scale_for(Some(&u), 0.0, 1_500.0);
+    assert_eq!(s.suffix, " kW");
+    assert!((1_500.0 * s.factor - 1.5).abs() < 1e-9);
+}
+
+#[test]
+fn scale_si_decimal_power_demotes_watts_to_mw() {
+    let u = parse("W").unwrap();
+    let s = scale_for(Some(&u), 0.0, 0.25);
+    assert_eq!(s.suffix, " mW");
+    assert!((0.25 * s.factor - 250.0).abs() < 1e-9);
+}
+
+#[test]
+fn scale_si_decimal_lux_promotes_to_klx() {
+    let u = parse("lx").unwrap();
+    let s = scale_for(Some(&u), 0.0, 1_500.0);
+    assert_eq!(s.suffix, " klx");
+    assert!((1_500.0 * s.factor - 1.5).abs() < 1e-9);
+}
+
+#[test]
+fn scale_si_decimal_lux_demotes_to_mlx() {
+    let u = parse("lx").unwrap();
+    let s = scale_for(Some(&u), 0.0, 0.25);
+    assert_eq!(s.suffix, " mlx");
+    assert!((0.25 * s.factor - 250.0).abs() < 1e-9);
+}
+
+#[test]
+fn scale_si_decimal_respects_prefixed_input_unit() {
+    let u = parse("kW").unwrap();
+    let s = scale_for(Some(&u), 0.0, 2_500.0);
+    assert_eq!(s.suffix, " MW");
+    assert!((2_500.0 * s.factor - 2.5).abs() < 1e-9);
+}
+
+#[test]
+fn scale_si_decimal_displays_micro_prefix() {
+    let u = parse("A").unwrap();
+    let s = scale_for(Some(&u), 0.0, 0.000_002);
+    assert_eq!(s.suffix, " µA");
+    assert!((0.000_002 * s.factor - 2.0).abs() < 1e-9);
+}
+
+#[test]
+fn scale_si_decimal_keeps_temperature_unscaled() {
+    let u = parse("Cel").unwrap();
+    let s = scale_for(Some(&u), 0.0, 1_500.0);
+    assert_eq!(s.suffix, " Cel");
+    assert!((1_500.0 * s.factor - 1_500.0).abs() < 1e-9);
+}
+
+// ---------- scale_for: mass concentration ----------------------------
+
+#[test]
+fn scale_mass_concentration_promotes_micrograms_to_milligrams() {
+    let u = parse("µg/m³").unwrap();
+    let s = scale_for(Some(&u), 0.0, 1_500.0);
+    assert_eq!(s.suffix, " mg/m³");
+    assert!((1_500.0 * s.factor - 1.5).abs() < 1e-9);
+}
+
+#[test]
+fn scale_mass_concentration_demotes_milligrams_to_micrograms() {
+    let u = parse("mg/m3").unwrap();
+    let s = scale_for(Some(&u), 0.0, 0.25);
+    assert_eq!(s.suffix, " µg/m³");
+    assert!((0.25 * s.factor - 250.0).abs() < 1e-9);
+}
+
+#[test]
+fn scale_mass_concentration_respects_prefixed_input() {
+    let u = parse("kg/m3").unwrap();
+    let s = scale_for(Some(&u), 0.0, 0.002);
+    assert_eq!(s.suffix, " g/m³");
+    assert!((0.002 * s.factor - 2.0).abs() < 1e-9);
+}
+
+// ---------- scale_for: currency --------------------------------------
+
+#[test]
+fn scale_currency_renders_symbol_prefix() {
+    let u = parse("EUR").unwrap();
+    let s = scale_for(Some(&u), 0.0, 1_234.5);
+    assert_eq!(s.prefix, "€");
+    assert_eq!(s.suffix, "");
+    assert_eq!(format_value(1_234.5, &s, 2), "€1234.50");
+}
+
+#[test]
+fn scale_currency_uses_library_symbol() {
+    let u = parse("CHF").unwrap();
+    let s = scale_for(Some(&u), 0.0, 12.0);
+    assert_eq!(s.prefix, iso_currency::Currency::CHF.symbol().to_string());
+    assert_eq!(format_value(12.0, &s, 2), "₣12.00");
 }
 
 // ---------- scale_for: percent / dimensionless -----------------------

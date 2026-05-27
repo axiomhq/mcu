@@ -678,6 +678,7 @@ impl App {
         self.sync_dashboard_from_buffer(&text);
         self.recompute_sig_help();
         self.sync_buffer_to_focused_tile();
+        self.sync_live_unit_from_buffer(&text);
     }
 
     /// Refresh the status-line signature help from the current cursor.

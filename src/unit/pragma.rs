@@ -8,11 +8,11 @@
 //! // @unit MiBy/s
 //! ```
 //!
-//! Format: `// @unit <ucum-expression>`. Anything after `@unit ` up
-//! to end-of-line is the expression. We validate it via
-//! [`crate::unit::parse`] so a buffer that types its way through a
-//! half-finished pragma surfaces a diagnostic instead of silently
-//! attaching a garbage unit.
+//! Format: `// @unit <expr>`. Anything after `@unit ` up to
+//! end-of-line is the expression. We validate it via
+//! [`crate::unit::parse`] (UCUM plus deliberate currency extensions)
+//! so a buffer that types its way through a half-finished pragma
+//! surfaces a diagnostic instead of silently attaching a garbage unit.
 
 use super::Unit;
 
@@ -22,7 +22,7 @@ use super::Unit;
 pub enum UnitPragmaError {
     /// The line started `// @unit` but had no expression afterwards.
     MissingExpr,
-    /// The expression didn't validate as a UCUM unit.
+    /// The expression didn't validate as a supported unit.
     InvalidExpr { token: String },
 }
 
@@ -31,7 +31,7 @@ impl std::fmt::Display for UnitPragmaError {
         match self {
             UnitPragmaError::MissingExpr => f.write_str("`@unit` pragma is missing the expression"),
             UnitPragmaError::InvalidExpr { token } => {
-                write!(f, "`@unit` expression is not a valid UCUM unit: `{token}`")
+                write!(f, "`@unit` expression is not a supported unit: `{token}`")
             }
         }
     }
@@ -126,9 +126,10 @@ mod tests {
     }
 
     #[test]
-    fn errors_on_invalid_ucum() {
+    fn errors_on_invalid_unit() {
         // Empty after the `@unit ` is missing-expr; but garbage that
-        // the UCUM library can't even parse lands here.
+        // neither the currency extension nor the UCUM library can
+        // parse lands here.
         let src = "// @unit ???\n";
         let err = parse_unit_pragma(src).unwrap_err();
         assert_eq!(err.0, 0);
@@ -151,6 +152,24 @@ mod tests {
         let src = "// @unit By/s\n";
         let u = parse_unit_pragma(src).unwrap().expect("pragma found");
         assert_eq!(u.family(), UnitFamily::BytesPerTime);
+    }
+
+    #[test]
+    fn handles_friendly_mass_concentration_pragma() {
+        let src = "// @unit µg/m³\nhome:pm25";
+        let u = parse_unit_pragma(src).unwrap().expect("pragma found");
+        assert_eq!(u.family(), UnitFamily::MassConcentration);
+        assert_eq!(u.raw(), "µg/m3");
+    }
+
+    #[test]
+    fn handles_currency_pragma_extension() {
+        let src = "// @unit EUR\nhome:price";
+        let u = parse_unit_pragma(src).unwrap().expect("pragma found");
+        assert_eq!(
+            u.family(),
+            UnitFamily::Currency(iso_currency::Currency::EUR)
+        );
     }
 
     #[test]

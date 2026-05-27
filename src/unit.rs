@@ -18,7 +18,9 @@
 //!
 //! Anything UCUM-valid but outside our known families is preserved
 //! verbatim as a display suffix without scaling — better to show
-//! `123 fortnights` than to drop the unit on the floor.
+//! `123 fortnights` than to drop the unit on the floor. ISO-4217
+//! currency codes are a deliberate non-UCUM extension and are parsed
+//! via the `iso_currency` crate.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -81,14 +83,71 @@ pub enum UnitFamily {
     BytesPerTime,
     /// Bits per time.
     BitsPerTime,
-    /// UCUM-valid but outside our families (e.g. `mol`, `Cel`,
-    /// custom engineering units). Rendered verbatim, no scaling.
+    /// Safe SI-prefixable engineering units where decimal scaling is
+    /// both conventional and useful in dashboards (W, V, A, J, Pa,
+    /// m, g, L, lx, lm, mol). This deliberately stays whitelist-based:
+    /// UCUM contains offset/special units (`Cel`, `[degF]`, ...)
+    /// where prefixes would be misleading.
+    SiDecimal(SiBase),
+    /// Mass concentration in grams per cubic metre (`ug/m3`,
+    /// `µg/m3`, `mg/m3`, `g/m3`, `kg/m3`). Display uses the nicer
+    /// superscript form (`µg/m³`) while parsing keeps UCUM syntax.
+    MassConcentration,
+    /// ISO-4217 currency extension (`EUR`, `USD`, `GBP`, ...). These
+    /// are intentionally not UCUM; parsed and rendered via the
+    /// `iso_currency` crate because dashboards commonly plot money.
+    Currency(iso_currency::Currency),
+    /// UCUM-valid but outside our families (e.g. `Cel`, custom
+    /// engineering units). Rendered verbatim, no scaling.
     Other,
+}
+
+/// SI-prefixable base units we scale with decimal engineering
+/// prefixes. The variants encode display semantics; parsing still
+/// accepts UCUM strings such as `kW`, `mlx`, or `mmol`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SiBase {
+    Watt,
+    Volt,
+    Ampere,
+    Joule,
+    Pascal,
+    Metre,
+    Gram,
+    Litre,
+    Lux,
+    Lumen,
+    Mole,
+}
+
+impl SiBase {
+    fn ucum_base(self) -> &'static str {
+        match self {
+            Self::Watt => "W",
+            Self::Volt => "V",
+            Self::Ampere => "A",
+            Self::Joule => "J",
+            Self::Pascal => "Pa",
+            Self::Metre => "m",
+            Self::Gram => "g",
+            Self::Litre => "L",
+            Self::Lux => "lx",
+            Self::Lumen => "lm",
+            Self::Mole => "mol",
+        }
+    }
+
+    fn display_base(self) -> &'static str {
+        self.ucum_base()
+    }
 }
 
 /// Result of picking a display prefix for a value range.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scaled {
+    /// Prefix to prepend before the value. Empty for normal units;
+    /// currency uses this for symbols like `€`/`$`/`£`.
+    pub prefix: String,
     /// Multiply the raw value by this factor to get the displayed
     /// number (e.g. `1.0 / (1<<20)` to go from bytes to MiB).
     pub factor: f64,
@@ -102,34 +161,39 @@ impl Scaled {
     /// caller has no unit at all.
     pub fn none() -> Self {
         Self {
+            prefix: String::new(),
             factor: 1.0,
             suffix: String::new(),
         }
     }
 }
 
-/// Parse a UCUM expression. Empty / whitespace-only strings yield
-/// `None`. Anything that doesn't validate as UCUM also yields `None`
-/// — we never want a bad unit to take down the chart; absence is
-/// the safe outcome.
+/// Parse a unit expression. Empty / whitespace-only strings yield
+/// `None`. ISO-4217 currency codes are accepted as a non-UCUM
+/// extension; otherwise the string must validate as UCUM. Anything
+/// unrecognised yields `None` — we never want a bad unit to take
+/// down the chart; absence is the safe outcome.
 pub fn parse(s: &str) -> Option<Unit> {
-    let raw = s.trim();
+    let raw = normalize_unit_input(s.trim());
     if raw.is_empty() {
         return None;
+    }
+    if let Some(currency) = iso_currency::Currency::from_code(&raw) {
+        return Some(Unit {
+            raw,
+            family: UnitFamily::Currency(currency),
+        });
     }
     // Syntax check via the UCUM library. The library is permissive
     // on some malformed strings (e.g. `kggg` parses as `k.g.g.g`),
     // but for our purposes a permissive parse is fine — the unit
     // just lands in `Other` if classification can't make sense of
     // it.
-    if octofhir_ucum::parse_expression(raw).is_err() {
+    if octofhir_ucum::parse_expression(&raw).is_err() {
         return None;
     }
-    let family = classify(raw);
-    Some(Unit {
-        raw: raw.to_string(),
-        family,
-    })
+    let family = classify(&raw);
+    Some(Unit { raw, family })
 }
 
 /// Classify a UCUM string into one of our display families.
@@ -178,6 +242,12 @@ fn classify(raw: &str) -> UnitFamily {
         return f;
     }
     if let Some(f) = bits_family(raw) {
+        return f;
+    }
+    if mass_concentration_factor(raw).is_some() {
+        return UnitFamily::MassConcentration;
+    }
+    if let Some(f) = si_family(raw) {
         return f;
     }
 
@@ -248,6 +318,58 @@ fn is_binary_prefix(prefix: &str) -> bool {
     )
 }
 
+/// Normalize friendly user input into UCUM-ish syntax before
+/// validation. This is intentionally tiny and display-driven: users
+/// type `µg/m³`, UCUM wants `µg/m3`; Greek mu `μ` is normalised to
+/// micro sign `µ`, which the UCUM crate accepts.
+fn normalize_unit_input(raw: &str) -> String {
+    raw.replace('μ', "µ").replace('³', "3").replace('²', "2")
+}
+
+/// If `raw` is one of the SI-prefixable engineering units we support,
+/// return its family. This is intentionally textual: it keeps offset
+/// units like `Cel` out of the scaling path, and avoids depending on
+/// UCUM canonicalisation for display semantics.
+fn si_family(raw: &str) -> Option<UnitFamily> {
+    SI_BASES
+        .iter()
+        .copied()
+        .find(|base| si_prefix_factor(raw, *base).is_some())
+        .map(UnitFamily::SiDecimal)
+}
+
+/// Factor from `raw` to the SI family's base unit. Examples:
+/// `kW → 1000 W`, `mlx → 0.001 lx`, `kg → 1000 g`.
+fn si_prefix_factor(raw: &str, base: SiBase) -> Option<f64> {
+    let suffix = base.ucum_base();
+    let prefix = raw.strip_suffix(suffix)?;
+    SI_PREFIXES
+        .iter()
+        .find(|p| p.ucum == prefix)
+        .map(|p| p.factor)
+}
+
+/// Factor from `raw` to the mass-concentration base `g/m3`.
+fn mass_concentration_factor(raw: &str) -> Option<f64> {
+    let (mass, volume) = raw.split_once('/')?;
+    if volume != "m3" {
+        return None;
+    }
+    si_prefix_factor(mass, SiBase::Gram)
+}
+
+/// Prefix for currency display. The library returns `¤` for codes
+/// without a common symbol; in that case the ISO code is clearer in
+/// a chart axis than the generic currency sign.
+fn currency_symbol_prefix(currency: iso_currency::Currency) -> String {
+    let symbol = currency.symbol().to_string();
+    if symbol == "¤" {
+        format!("{} ", currency.code())
+    } else {
+        symbol
+    }
+}
+
 /// Pick a display scale for a value range under the given unit.
 /// `None` for `unit` means "no unit known"; we return identity.
 ///
@@ -267,13 +389,22 @@ pub fn scale_for(unit: Option<&Unit>, range_lo: f64, range_hi: f64) -> Scaled {
         UnitFamily::BitsDecimal => pick_bytes_bits(u, BITS_DECIMAL, mag_input),
         UnitFamily::Time => pick_via_ucum(u, TIME, mag_input),
         UnitFamily::Frequency => pick_via_ucum(u, FREQUENCY, mag_input),
-        UnitFamily::BytesPerTime => pick_rate(u, BYTES_RATE_TABLE),
-        UnitFamily::BitsPerTime => pick_rate(u, BITS_RATE_TABLE),
+        UnitFamily::BytesPerTime => pick_rate(u, BYTES_RATE_TABLE, mag_input),
+        UnitFamily::BitsPerTime => pick_rate(u, BITS_RATE_TABLE, mag_input),
+        UnitFamily::SiDecimal(base) => pick_si_decimal(u, base, mag_input),
+        UnitFamily::MassConcentration => pick_mass_concentration(u, mag_input),
+        UnitFamily::Currency(currency) => Scaled {
+            prefix: currency_symbol_prefix(currency),
+            factor: 1.0,
+            suffix: String::new(),
+        },
         UnitFamily::Percent => Scaled {
+            prefix: String::new(),
             factor: 1.0,
             suffix: "%".to_string(),
         },
         UnitFamily::Dimensionless | UnitFamily::Other => Scaled {
+            prefix: String::new(),
             factor: 1.0,
             suffix: format!(" {}", u.raw),
         },
@@ -291,6 +422,7 @@ fn pick_via_ucum(unit: &Unit, table: &[PrefixRow], mag_input: f64) -> Scaled {
     let row = pick_row(table, mag_canon);
     let factor = conversion_factor_via_canonical(&unit.raw, row.target).unwrap_or(1.0);
     Scaled {
+        prefix: String::new(),
         factor,
         suffix: format!(" {}", row.display),
     }
@@ -311,6 +443,7 @@ fn pick_bytes_bits(unit: &Unit, table: &[BinPrefixRow], mag_input: f64) -> Scale
         .expect("byte/bit tables are never empty");
     let factor = to_base / row.threshold_factor;
     Scaled {
+        prefix: String::new(),
         factor,
         suffix: format!(" {}", row.display),
     }
@@ -321,7 +454,7 @@ fn pick_bytes_bits(unit: &Unit, table: &[BinPrefixRow], mag_input: f64) -> Scale
 /// per-second magnitude. Picking thresholds by per-second magnitude
 /// matches user intuition — "show me MiB/s when the value is around
 /// the MiB-per-second range".
-fn pick_rate(unit: &Unit, table: RateFamily) -> Scaled {
+fn pick_rate(unit: &Unit, table: RateFamily, mag_input: f64) -> Scaled {
     // Strip the denominator from the raw and find the numerator's
     // factor to the family base (e.g. KiBy → 1024 By).
     let (num, denom) = unit.raw.split_once('/').unwrap_or((unit.raw.as_str(), "s"));
@@ -332,13 +465,52 @@ fn pick_rate(unit: &Unit, table: RateFamily) -> Scaled {
     // Input units per second = (num_factor base / 1 denom_unit) × (1 denom_unit / denom_to_s s)
     //                        = num_factor / denom_to_s  base/s
     let factor_to_base_per_s = num_factor / denom_to_s;
+    let mag_base_per_s = mag_input * factor_to_base_per_s;
+    let row = table
+        .numerator
+        .iter()
+        .find(|r| mag_base_per_s >= r.threshold_factor)
+        .or_else(|| table.numerator.last())
+        .expect("rate numerator tables are never empty");
 
-    // No data magnitude here (scale_for doesn't thread the rate
-    // magnitude into pick_rate yet). Default to the family's base
-    // display; the value gets converted to base-per-second.
     Scaled {
-        factor: factor_to_base_per_s,
-        suffix: format!(" {}/s", table.base_display),
+        prefix: String::new(),
+        factor: factor_to_base_per_s / row.threshold_factor,
+        suffix: format!(" {}/s", row.display),
+    }
+}
+
+/// Decimal-SI picker for whitelisted engineering units. UCUM syntax
+/// accepts both `u` and `µ`; display always uses the typographic `µ`.
+fn pick_si_decimal(unit: &Unit, base: SiBase, mag_input: f64) -> Scaled {
+    let input_factor = si_prefix_factor(&unit.raw, base).unwrap_or(1.0);
+    let mag_base = mag_input * input_factor;
+    let row = SI_PREFIXES
+        .iter()
+        .find(|p| mag_base >= p.factor)
+        .or_else(|| SI_PREFIXES.last())
+        .expect("SI prefix table is never empty");
+    Scaled {
+        prefix: String::new(),
+        factor: input_factor / row.factor,
+        suffix: format!(" {}{}", row.display, base.display_base()),
+    }
+}
+
+/// Mass-concentration picker. Internally we normalise to `g/m3` and
+/// display with typographic cubic metre (`m³`).
+fn pick_mass_concentration(unit: &Unit, mag_input: f64) -> Scaled {
+    let input_factor = mass_concentration_factor(&unit.raw).unwrap_or(1.0);
+    let mag_base = mag_input * input_factor;
+    let row = MASS_CONCENTRATION
+        .iter()
+        .find(|r| mag_base >= r.factor)
+        .or_else(|| MASS_CONCENTRATION.last())
+        .expect("mass concentration table is never empty");
+    Scaled {
+        prefix: String::new(),
+        factor: input_factor / row.factor,
+        suffix: format!(" {}/m³", row.display),
     }
 }
 
@@ -427,18 +599,111 @@ struct BinPrefixRow {
 #[derive(Clone, Copy)]
 struct RateFamily {
     numerator: &'static [BinPrefixRow],
-    base_display: &'static str,
+}
+
+struct SiPrefixRow {
+    ucum: &'static str,
+    display: &'static str,
+    factor: f64,
 }
 
 const BYTES_RATE_TABLE: RateFamily = RateFamily {
     numerator: BYTES_BINARY,
-    base_display: "B",
 };
 
 const BITS_RATE_TABLE: RateFamily = RateFamily {
     numerator: BITS_BINARY,
-    base_display: "bit",
 };
+
+const SI_BASES: &[SiBase] = &[
+    SiBase::Watt,
+    SiBase::Volt,
+    SiBase::Ampere,
+    SiBase::Joule,
+    SiBase::Pascal,
+    SiBase::Metre,
+    SiBase::Gram,
+    SiBase::Litre,
+    SiBase::Lux,
+    SiBase::Lumen,
+    SiBase::Mole,
+];
+
+const SI_PREFIXES: &[SiPrefixRow] = &[
+    SiPrefixRow {
+        ucum: "T",
+        display: "T",
+        factor: 1e12,
+    },
+    SiPrefixRow {
+        ucum: "G",
+        display: "G",
+        factor: 1e9,
+    },
+    SiPrefixRow {
+        ucum: "M",
+        display: "M",
+        factor: 1e6,
+    },
+    SiPrefixRow {
+        ucum: "k",
+        display: "k",
+        factor: 1e3,
+    },
+    SiPrefixRow {
+        ucum: "",
+        display: "",
+        factor: 1.0,
+    },
+    SiPrefixRow {
+        ucum: "m",
+        display: "m",
+        factor: 1e-3,
+    },
+    SiPrefixRow {
+        ucum: "u",
+        display: "µ",
+        factor: 1e-6,
+    },
+    SiPrefixRow {
+        ucum: "µ",
+        display: "µ",
+        factor: 1e-6,
+    },
+    SiPrefixRow {
+        ucum: "n",
+        display: "n",
+        factor: 1e-9,
+    },
+];
+
+const MASS_CONCENTRATION: &[SiPrefixRow] = &[
+    SiPrefixRow {
+        ucum: "kg",
+        display: "kg",
+        factor: 1e3,
+    },
+    SiPrefixRow {
+        ucum: "g",
+        display: "g",
+        factor: 1.0,
+    },
+    SiPrefixRow {
+        ucum: "mg",
+        display: "mg",
+        factor: 1e-3,
+    },
+    SiPrefixRow {
+        ucum: "ug",
+        display: "µg",
+        factor: 1e-6,
+    },
+    SiPrefixRow {
+        ucum: "ng",
+        display: "ng",
+        factor: 1e-9,
+    },
+];
 
 // `threshold_factor` for byte/bit prefixes = the factor from this
 // row's unit to the base unit, which doubles as the threshold for
@@ -641,11 +906,13 @@ const FREQUENCY: &[PrefixRow] = &[
 /// fractional digits of the scaled (i.e. post-multiplication) number.
 pub fn format_value(v: f64, scaled: &Scaled, decimals: usize) -> String {
     let scaled_v = v * scaled.factor;
-    if scaled.suffix.is_empty() {
-        format!("{scaled_v:.*}", decimals)
-    } else {
-        format!("{scaled_v:.*}{}", decimals, scaled.suffix)
-    }
+    format!(
+        "{}{:.prec$}{}",
+        scaled.prefix,
+        scaled_v,
+        scaled.suffix,
+        prec = decimals
+    )
 }
 
 pub mod pragma;

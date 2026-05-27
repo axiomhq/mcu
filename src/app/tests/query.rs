@@ -546,3 +546,81 @@ fn tile_query_finished_resolves_unit_from_metric_info() {
     assert_eq!(unit.family(), crate::unit::UnitFamily::BytesBinary);
     assert_eq!(unit.raw(), "By");
 }
+
+// ---- Live `// @unit` editing -----------------------------------------
+
+#[test]
+fn editing_unit_pragma_updates_solo_unit_without_rerun() {
+    let mut app = test_app();
+
+    set_buffer(&mut app, "// @unit By\nhome:temp");
+    let unit = app.unit.as_ref().expect("unit pragma resolved live");
+    assert_eq!(unit.family(), crate::unit::UnitFamily::BytesBinary);
+
+    set_buffer(&mut app, "// @unit ms\nhome:temp");
+    let unit = app.unit.as_ref().expect("edited unit pragma resolved live");
+    assert_eq!(unit.family(), crate::unit::UnitFamily::Time);
+    assert_eq!(unit.raw(), "ms");
+}
+
+#[test]
+fn live_unit_resolution_does_not_strip_viz_comment() {
+    let mut app = test_app();
+
+    // `// @viz` is just a leading MPL comment for this path. The
+    // dataset/metric extractor skips it and the unit parser still
+    // finds the later `// @unit` in the same leading comment block.
+    set_buffer(&mut app, "// @viz line\n// @unit By\nhome:temp");
+    let unit = app
+        .unit
+        .as_ref()
+        .expect("unit pragma found after viz pragma");
+    assert_eq!(unit.family(), crate::unit::UnitFamily::BytesBinary);
+}
+
+#[test]
+fn live_unit_resolution_prefers_metric_info_over_pragma() {
+    let mut app = test_app();
+    {
+        let mut metrics = BTreeMap::new();
+        metrics.insert(
+            "temp".to_string(),
+            MetricInfo {
+                kind: None,
+                temporality: None,
+                unit: Some("s".to_string()),
+            },
+        );
+        app.cache.write().replace_metrics("home", metrics);
+    }
+
+    set_buffer(&mut app, "// @unit By\nhome:temp");
+    let unit = app.unit.as_ref().expect("metric metadata resolved live");
+    assert_eq!(unit.family(), crate::unit::UnitFamily::Time);
+    assert_eq!(unit.raw(), "s");
+}
+
+#[test]
+fn editing_unit_pragma_updates_focused_dashboard_tile_without_rerun() {
+    let mut app = test_app();
+    app.handle_event(AppEvent::DashboardOpened {
+        uid: "u".into(),
+        result: Ok(multi_chart_resource()),
+    });
+    let chart_id = app.current_chart_id().expect("fixture has a focused chart");
+    app.tile_results.insert(
+        chart_id.clone(),
+        crate::app::types::TileQueryResult {
+            series: vec![],
+            ..Default::default()
+        },
+    );
+
+    set_buffer(&mut app, "// @viz line\n// @unit By\ntop-left:rate");
+    let unit = app
+        .tile_results
+        .get(&chart_id)
+        .and_then(|tile| tile.unit.as_ref())
+        .expect("focused tile unit updated live");
+    assert_eq!(unit.family(), crate::unit::UnitFamily::BytesBinary);
+}

@@ -76,6 +76,45 @@ Change `line` to `bar`, `area`, `scatter`, `pie`, `heatmap`, `table`,
 `top_list`, `statistic`, `log_stream`, `monitor_list`, `note`, or
 `spacer` to switch chart kinds without touching the query.
 
+A second pragma sets the display unit:
+
+```
+// @viz line
+// @unit MiBy/s
+```
+
+The unit drives axis labels and statistic readouts. The value is a
+[UCUM](https://ucum.org/) expression, with a few quality-of-life
+extensions:
+
+- Storage and throughput scale automatically: `By`, `KiBy`, `MiBy`,
+  `kBy`, `MBy`, `bit`, `Mibit`, `Mbit`, and the matching rates
+  (`By/s`, `MiBy/s`, `bit/s`, `Mbit/s`). `1500000 By/s` becomes
+  `1.43 MiB/s`.
+- Time and frequency scale by magnitude: `ns`, `us`, `ms`, `s`,
+  `min`, `h`, `d`; `Hz`, `kHz`, `MHz`, `GHz`.
+- SI engineering units scale with decimal prefixes (`n`, `µ`, `m`,
+  base, `k`, `M`, `G`, `T`): `W`, `V`, `A`, `J`, `Pa`, `m`, `g`,
+  `L`, `lx`, `lm`, `mol`. `1500 W` becomes `1.50 kW`; `1500 lx`
+  becomes `1.50 klx`.
+- Mass concentration is supported with friendly typography:
+  `ug/m3`, `µg/m3`, `mg/m3`, `g/m3`, `kg/m3`. You can type
+  `µg/m³` directly; the superscript and Greek mu are normalised.
+- Percent (`%`) and OTEL-style annotations (`{request}`) render
+  verbatim with no scaling.
+- ISO 4217 currency codes (`EUR`, `USD`, `GBP`, `JPY`, `CHF`, ...)
+  render with the currency's symbol: `€1234.50`, `£1234.50`. This
+  is a deliberate non-UCUM extension.
+
+Resolution order when several sources supply a unit:
+
+1. `MetricInfo.unit` from the metrics-info endpoint.
+2. The `otel.metric.unit` tag on a series.
+3. The `// @unit` pragma in the editor buffer.
+
+The pragma updates live while you type — you do not have to rerun
+the query to switch the axis from `By` to `MiB` or from `ms` to `s`.
+
 ### Dashboards
 
 `:dash ls` opens a searchable picker over every dashboard in your

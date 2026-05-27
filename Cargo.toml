@@ -32,3 +32,4 @@ parking_lot = "0.12"
 # + canonical-factor extraction; the wider FHIR-conversion surface is
 # untouched.
 octofhir-ucum = "0.5"
+iso_currency = "0.5.3"

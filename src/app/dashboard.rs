@@ -406,6 +406,74 @@ impl App {
         )
     }
 
+    /// Resolve the best unit from editor-visible state, without
+    /// waiting for a fetch response. This mirrors the persisted
+    /// discovery order as closely as the live editor can:
+    ///
+    /// 1. cached `MetricInfo.unit` for the query's `(dataset, metric)`
+    /// 2. existing rendered-series `otel.metric.unit` tags, if any
+    /// 3. `// @unit` pragma in the buffer
+    ///
+    /// The raw buffer is passed through unchanged. `// @viz` and
+    /// other leading comments are comments as far as MPL is
+    /// concerned; `extract_dataset_metric` already skips them, and
+    /// the unit pragma parser scans the same leading comment block.
+    fn resolve_live_unit_from_buffer(
+        &self,
+        text: &str,
+        series: &[crate::chart::Series],
+    ) -> Option<crate::unit::Unit> {
+        if let Ok((dataset, metric)) = crate::mpl::extract_dataset_metric(text) {
+            let cache = self.cache.read();
+            if let Some(info) = cache.metric_info(&dataset, &metric)
+                && let Some(raw) = info.unit.as_deref()
+                && let Some(unit) = crate::unit::parse(raw)
+            {
+                return Some(unit);
+            }
+        }
+
+        for s in series {
+            for (name, value) in &s.tags {
+                if name == "otel.metric.unit"
+                    && let Some(raw) = value.as_str()
+                    && let Some(unit) = crate::unit::parse(raw)
+                {
+                    return Some(unit);
+                }
+            }
+        }
+
+        crate::unit::pragma::parse_unit_pragma(text).ok().flatten()
+    }
+
+    /// Keep unit display in sync with `// @unit` edits. Fetch
+    /// completion remains authoritative for response-tag discovery,
+    /// but the editor should not need a rerun just to change axis
+    /// labels from `By` to `MiB` or `ms` to `s`.
+    pub(super) fn sync_live_unit_from_buffer(&mut self, text: &str) {
+        if self.buffer_mode == BufferMode::Dashboard {
+            let Some(chart_id) = self.current_chart_id() else {
+                return;
+            };
+            let series = self
+                .tile_results
+                .get(&chart_id)
+                .map(|t| t.series.clone())
+                .unwrap_or_default();
+            let unit = self.resolve_live_unit_from_buffer(text, &series);
+            if let Some(tile) = self.tile_results.get_mut(&chart_id) {
+                tile.unit = unit.clone();
+            }
+            if self.view_mode == ViewMode::Solo {
+                self.unit = unit;
+            }
+        } else {
+            let series = self.series.clone();
+            self.unit = self.resolve_live_unit_from_buffer(text, &series);
+        }
+    }
+
     /// surfacing that as a status-bar error is noise, so we suppress it.
     /// Returns the extracted [`Query`] so callers (zoom) can use it for
     /// follow-up state updates without re-extracting.
