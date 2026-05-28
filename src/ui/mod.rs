@@ -344,6 +344,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         overlays::draw_dashinfo_overlay(f, resource, f.area());
     }
 
+    // `:history` overlay — read-only listing of past `:` commands.
+    if app.history_overlay_visible {
+        overlays::draw_history_overlay(f, app, f.area());
+    }
+
     // Viz-kind picker overlay — shared by `a` (add) and `o`/`O` (open).
     if let crate::app::TileSubMode::PickViz { cursor, action } = &app.tile_submode {
         overlays::draw_pick_viz_overlay(f, *cursor, *action, f.area());

@@ -88,6 +88,12 @@ pub struct App {
     pub completions: CompletionState,
     pub quickfix: QuickFixPicker,
     pub cmdline: CmdLine,
+    /// Persistent `:` command history. Loaded from disk in [`App::new`]
+    /// and updated atomically on every successful submit.
+    pub history: crate::history::History,
+    /// `:history` overlay visibility. Toggled by the ex-command;
+    /// dismissed by `Esc`/`q`/`Enter` while visible.
+    pub history_overlay_visible: bool,
     /// Live diagnostics for the current buffer.
     /// Recomputed by [`App::recompute_diagnostics`] on every buffer-mutating key.
     pub diagnostics: Vec<mpl::Diagnostic>,
@@ -278,10 +284,22 @@ pub struct App {
 
 impl App {
     pub fn new(runtime: Handle) -> Self {
-        Self::with_cache(runtime, default_cache())
+        Self::with_cache_and_history(runtime, default_cache(), crate::history::History::load())
     }
 
+    /// Test-only entry point: in-memory cache, in-memory history.
+    /// Used by `test_app()` so the suite never touches the user's
+    /// real `~/.local/share/mcu/` or `~/.cache/mcu/` directories.
+    #[cfg(test)]
     pub fn with_cache(runtime: Handle, cache: Cache) -> Self {
+        Self::with_cache_and_history(runtime, cache, crate::history::History::default())
+    }
+
+    pub fn with_cache_and_history(
+        runtime: Handle,
+        cache: Cache,
+        history: crate::history::History,
+    ) -> Self {
         let (events_tx, events_rx) = mpsc::channel();
         let cached_count = cache.dataset_count();
         let saved_query = cache.load_query();
@@ -330,6 +348,8 @@ impl App {
             mode: Mode::Normal,
             editor,
             cmdline: CmdLine::default(),
+            history,
+            history_overlay_visible: false,
             params: ParamsState {
                 selected: 0,
                 system: params::default_system_params(),

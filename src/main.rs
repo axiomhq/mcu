@@ -9,6 +9,7 @@ mod config;
 mod dashboard;
 mod editor;
 mod highlight;
+mod history;
 mod hover;
 mod motion;
 mod mpl;

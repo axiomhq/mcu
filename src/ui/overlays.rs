@@ -567,3 +567,45 @@ pub(super) fn draw_legend_details(f: &mut Frame, app: &App, graph_area: Rect) {
     lines.extend(footer_lines);
     f.render_widget(Paragraph::new(lines), inner);
 }
+
+/// `:history` overlay — read-only listing of the persisted `:`
+/// command history, newest first. v1 dismisses on any key; for
+/// recall the user types Up from a fresh `:` cmdline (which walks
+/// the same list under vim semantics). Index column is 1-based and
+/// mirrors what a future `:history <N>` could refer to.
+pub(super) fn draw_history_overlay(f: &mut Frame, app: &App, screen: Rect) {
+    let entries: Vec<&String> = app.history.entries().iter().rev().collect();
+    // Width tracks the longest entry but is capped so wide commands
+    // don't blow past the screen.
+    let longest = entries.iter().map(|e| e.chars().count()).max().unwrap_or(0);
+    // 4-char left gutter for `123 ` index column, plus 4-cell padding
+    // inside the frame.
+    let want_w = (longest + 8) as u16;
+    let width = want_w.clamp(40, screen.width.saturating_sub(4).max(40));
+    let height = (entries.len() as u16 + 3).clamp(6, screen.height.saturating_sub(2).max(6));
+    let inner = modal_frame(
+        f,
+        centered_area(screen, width, height),
+        " history ",
+        Color::Cyan,
+    );
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+    let idx_pad = entries.len().to_string().chars().count();
+    let lines: Vec<Line<'_>> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, entry)| {
+            let n = i + 1;
+            Line::from(vec![
+                Span::styled(
+                    format!(" {n:>idx_pad$}  "),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::raw(entry.as_str()),
+            ])
+        })
+        .collect();
+    f.render_widget(Paragraph::new(lines), inner);
+}

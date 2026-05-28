@@ -93,6 +93,7 @@ impl App {
             "trace" => self.cmd_trace(),
             "time" => self.cmd_time(&args),
             "dashinfo" | "di" => self.cmd_dashinfo(),
+            "history" | "his" => self.cmd_history(),
             "dash" => self.cmd_dash(&args, bang),
             "grid" => self.cmd_grid(),
             "solo" => self.cmd_solo(),
@@ -430,6 +431,18 @@ impl App {
             Some(id) => self.status = format!("trace: {id}"),
             None => self.status = "no trace id available (run a query first)".to_string(),
         }
+    }
+
+    /// `:history` / `:his` — toggle the read-only overlay listing
+    /// previously-submitted `:` commands, newest first. The list is
+    /// also what `<Up>`/`<Down>` walk through from the cmdline. The
+    /// overlay is informational only: dismiss with `Esc`/`q`/`Enter`.
+    fn cmd_history(&mut self) {
+        if self.history.entries().is_empty() {
+            self.status = "history is empty".to_string();
+            return;
+        }
+        self.history_overlay_visible = !self.history_overlay_visible;
     }
 
     /// `:dashinfo` / `:di` — toggle the overlay summarising the loaded

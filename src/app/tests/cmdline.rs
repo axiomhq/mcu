@@ -501,3 +501,207 @@ fn ctrl_w_respects_cursor_position() {
     app.on_key(ctrl(KeyCode::Char('w')));
     assert_eq!(app.cmdline.buf, "open def");
 }
+
+// ---------- :cmdline history (vim c_<Up>/c_<Down> semantics) --------
+
+/// Enter `:` then submit `cmd`. The test_app's history is in-memory,
+/// so this exercises push + persistence-flag-flip without touching
+/// disk.
+fn submit_command(app: &mut App, cmd: &str) {
+    app.on_key(key(KeyCode::Char(':')));
+    type_text(app, cmd);
+    app.on_key(key(KeyCode::Enter));
+}
+
+#[test]
+fn submit_pushes_to_history() {
+    let mut app = test_app();
+    submit_command(&mut app, "p host=\"db-01\"");
+    submit_command(&mut app, "p user=\"alice\"");
+    let entries: Vec<&str> = app.history.entries().iter().map(String::as_str).collect();
+    assert_eq!(entries, ["p host=\"db-01\"", "p user=\"alice\""]);
+}
+
+#[test]
+fn submit_duplicate_promotes_to_tail() {
+    let mut app = test_app();
+    submit_command(&mut app, "p a=1");
+    submit_command(&mut app, "p b=2");
+    submit_command(&mut app, "p a=1");
+    let entries: Vec<&str> = app.history.entries().iter().map(String::as_str).collect();
+    assert_eq!(
+        entries,
+        ["p b=2", "p a=1"],
+        "earlier duplicate removed, new entry at tail"
+    );
+}
+
+#[test]
+fn esc_does_not_record_history() {
+    let mut app = test_app();
+    app.on_key(key(KeyCode::Char(':')));
+    type_text(&mut app, "p host=\"db-01\"");
+    app.on_key(key(KeyCode::Esc));
+    assert!(
+        app.history.entries().is_empty(),
+        "cancelled commands must not enter history"
+    );
+}
+
+#[test]
+fn empty_submit_does_not_record() {
+    let mut app = test_app();
+    // Pressing `:` then Enter immediately submits an empty line —
+    // vim treats this as a no-op for history.
+    app.on_key(key(KeyCode::Char(':')));
+    app.on_key(key(KeyCode::Enter));
+    assert!(app.history.entries().is_empty());
+}
+
+#[test]
+fn up_recalls_most_recent_entry() {
+    let mut app = test_app();
+    submit_command(&mut app, "p a=1");
+    submit_command(&mut app, "p b=2");
+    // Open fresh cmdline; Up should recall "p b=2" (the most recent).
+    app.on_key(key(KeyCode::Char(':')));
+    app.on_key(key(KeyCode::Up));
+    assert_eq!(app.cmdline.buf, "p b=2");
+    // Cursor at end.
+    assert_eq!(app.cmdline.cursor, "p b=2".chars().count());
+    // Second Up walks back to the previous entry.
+    app.on_key(key(KeyCode::Up));
+    assert_eq!(app.cmdline.buf, "p a=1");
+    // Third Up — nothing older — stays put (silent no-op).
+    app.on_key(key(KeyCode::Up));
+    assert_eq!(app.cmdline.buf, "p a=1");
+}
+
+#[test]
+fn up_with_typed_prefix_filters_history() {
+    let mut app = test_app();
+    submit_command(&mut app, "p host=\"db-01\"");
+    submit_command(&mut app, "dashboard ls");
+    submit_command(&mut app, "p user=\"alice\"");
+    submit_command(&mut app, "dashboard open foo");
+
+    // Type "p " and press Up — should jump over the two "dashboard"
+    // entries straight to the most-recent "p ".
+    app.on_key(key(KeyCode::Char(':')));
+    type_text(&mut app, "p ");
+    app.on_key(key(KeyCode::Up));
+    assert_eq!(app.cmdline.buf, "p user=\"alice\"");
+    // Next Up — older "p " match.
+    app.on_key(key(KeyCode::Up));
+    assert_eq!(app.cmdline.buf, "p host=\"db-01\"");
+    // No older "p " match — stays put.
+    app.on_key(key(KeyCode::Up));
+    assert_eq!(app.cmdline.buf, "p host=\"db-01\"");
+}
+
+#[test]
+fn down_past_most_recent_restores_typed_buffer() {
+    // Vim invariant: pressing Down past the most-recent match
+    // restores exactly what the user had typed when they first
+    // pressed Up — not the empty buffer.
+    let mut app = test_app();
+    submit_command(&mut app, "p a=1");
+    submit_command(&mut app, "p b=2");
+
+    app.on_key(key(KeyCode::Char(':')));
+    type_text(&mut app, "p ");
+    app.on_key(key(KeyCode::Up)); // -> "p b=2"
+    assert_eq!(app.cmdline.buf, "p b=2");
+    app.on_key(key(KeyCode::Down)); // past most-recent -> restore "p "
+    assert_eq!(app.cmdline.buf, "p ");
+    assert_eq!(
+        app.cmdline.cursor, 2,
+        "cursor restored to end of typed prefix"
+    );
+}
+
+#[test]
+fn typing_after_up_resets_nav_prefix() {
+    // After recalling an entry and then typing a character, the
+    // next Up should treat the *new* buffer as the prefix capture.
+    let mut app = test_app();
+    submit_command(&mut app, "dash ls");
+    submit_command(&mut app, "dash open foo");
+    submit_command(&mut app, "p a=1");
+
+    app.on_key(key(KeyCode::Char(':')));
+    type_text(&mut app, "p ");
+    app.on_key(key(KeyCode::Up)); // -> "p a=1"
+    assert_eq!(app.cmdline.buf, "p a=1");
+    // Type an `x`. This must reset nav state. The next Up
+    // recaptures prefix = "p a=1x" — no match, so Up is a no-op.
+    app.on_key(key(KeyCode::Char('x')));
+    assert_eq!(app.cmdline.buf, "p a=1x");
+    assert!(
+        app.cmdline.history_cursor.is_none(),
+        "typing resets nav cursor"
+    );
+    app.on_key(key(KeyCode::Up));
+    assert_eq!(
+        app.cmdline.buf, "p a=1x",
+        "no history entry matches 'p a=1x' prefix → stays put"
+    );
+}
+
+#[test]
+fn cmdline_reset_clears_nav_state_for_next_session() {
+    // Escaping out of the cmdline should leave it in a clean state
+    // — opening it again starts fresh nav.
+    let mut app = test_app();
+    submit_command(&mut app, "a");
+    submit_command(&mut app, "b");
+
+    app.on_key(key(KeyCode::Char(':')));
+    app.on_key(key(KeyCode::Up)); // -> "b"
+    assert_eq!(app.cmdline.buf, "b");
+    app.on_key(key(KeyCode::Esc));
+    assert!(app.cmdline.buf.is_empty());
+    assert!(app.cmdline.history_cursor.is_none());
+    assert!(app.cmdline.history_stash.is_none());
+    assert!(app.cmdline.history_prefix.is_empty());
+}
+
+#[test]
+fn cmd_history_toggles_overlay() {
+    let mut app = test_app();
+    submit_command(&mut app, "p a=1");
+    assert!(!app.history_overlay_visible);
+    app.execute_command("history");
+    assert!(app.history_overlay_visible, "first :history opens overlay");
+    app.execute_command("history");
+    assert!(!app.history_overlay_visible, "second :history closes it");
+}
+
+#[test]
+fn cmd_history_empty_shows_status_does_not_open() {
+    let mut app = test_app();
+    app.execute_command("history");
+    assert!(
+        !app.history_overlay_visible,
+        "no overlay when history is empty"
+    );
+    assert!(app.status.contains("empty"), "got: {:?}", app.status);
+}
+
+#[test]
+fn history_overlay_dismisses_on_keypress() {
+    let mut app = test_app();
+    submit_command(&mut app, "p a=1");
+    app.execute_command("history");
+    assert!(app.history_overlay_visible);
+    app.on_key(key(KeyCode::Esc));
+    assert!(!app.history_overlay_visible);
+}
+
+#[test]
+fn his_alias_works() {
+    let mut app = test_app();
+    submit_command(&mut app, "p a=1");
+    app.execute_command("his");
+    assert!(app.history_overlay_visible);
+}

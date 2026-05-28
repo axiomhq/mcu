@@ -527,12 +527,40 @@ pub struct CmdLine {
     /// pane returns there after submit. `None` for `:` entered from
     /// Normal mode.
     pub return_focus: Option<Pane>,
+    /// Vim-style history navigation state. `None` while the user
+    /// is editing the live buffer; `Some(i)` after the first Up,
+    /// pointing at the recalled history entry. Cleared on dismiss
+    /// and on any non-Up/Down/Enter/Esc key.
+    pub history_cursor: Option<usize>,
+    /// The filter prefix captured at the moment of the first Up,
+    /// matching vim semantics: only entries whose text starts
+    /// with this prefix are visited. The prefix is the buffer
+    /// **up to the cursor** at capture time — chars after the
+    /// cursor are discarded once the user starts walking.
+    pub history_prefix: String,
+    /// The live buffer + cursor stashed when the user first
+    /// pressed Up, so Down-past-most-recent restores exactly what
+    /// they were typing.
+    pub history_stash: Option<(String, usize)>,
 }
 
 impl CmdLine {
     pub fn reset(&mut self) {
         self.buf.clear();
         self.cursor = 0;
+        self.reset_history_nav();
+    }
+
+    /// Clear the history-navigation transients. Called both from
+    /// [`reset`] (open / dismiss) and from every non-navigation
+    /// key in `handle_command_key`, so the next Up re-captures a
+    /// fresh prefix from whatever the user has now typed.
+    ///
+    /// [`reset`]: CmdLine::reset
+    pub fn reset_history_nav(&mut self) {
+        self.history_cursor = None;
+        self.history_prefix.clear();
+        self.history_stash = None;
     }
 
     pub(super) fn byte_cursor(&self) -> usize {

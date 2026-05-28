@@ -35,6 +35,11 @@ impl App {
             self.dashinfo_visible = false;
             return;
         }
+        if self.history_overlay_visible {
+            // Any key dismisses — v1 is read-only, no interaction.
+            self.history_overlay_visible = false;
+            return;
+        }
         if self.tile_inspect_json.is_some() {
             self.tile_inspect_json = None;
             return;
