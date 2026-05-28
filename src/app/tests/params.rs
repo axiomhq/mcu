@@ -1,6 +1,48 @@
 //! params tests.
 
 use super::*;
+use crossterm::event::KeyCode;
+
+/// Submit a `:` ex-command through the real key path so the param
+/// cache refresh runs exactly as it does in production.
+fn submit(app: &mut App, cmd: &str) {
+    app.on_key(key(KeyCode::Char(':')));
+    type_text(app, cmd);
+    app.on_key(key(KeyCode::Enter));
+}
+
+#[test]
+fn param_rows_cache_matches_live_rows_after_recompute() {
+    let mut app = test_app();
+    // `set_buffer` runs `recompute_diagnostics`, which fills the cache.
+    set_buffer(&mut app, "param $host: string;\nfoo:bar");
+    assert_eq!(app.param_rows_cache, app.param_rows());
+    assert!(app.param_rows_cache.iter().any(|r| r.name == "host"));
+}
+
+#[test]
+fn param_rows_cache_refreshes_after_p_set_and_clear() {
+    let mut app = test_app();
+    set_buffer(&mut app, "param $host: string;\nfoo:bar");
+    submit(&mut app, "p host=\"db-01\"");
+    let row = app
+        .param_rows_cache
+        .iter()
+        .find(|r| r.name == "host")
+        .expect("host row in cache after :p set");
+    assert_eq!(row.status, crate::params::ParamStatus::Ok);
+    assert_eq!(row.value.as_deref(), Some("\"db-01\""));
+
+    // `:p!` clears every value; the cached row must drop back to NotSet.
+    submit(&mut app, "p!");
+    let row = app
+        .param_rows_cache
+        .iter()
+        .find(|r| r.name == "host")
+        .expect("host row still declared after clear");
+    assert_eq!(row.status, crate::params::ParamStatus::NotSet);
+    assert_eq!(app.param_rows_cache, app.param_rows());
+}
 
 #[test]
 fn param_rows_declared_unset_is_not_set() {

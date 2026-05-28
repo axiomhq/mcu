@@ -25,7 +25,7 @@ pub(super) fn draw_params(f: &mut Frame, app: &App, area: Rect, focused: bool) {
         return;
     }
 
-    let rows = app.param_rows();
+    let rows = &app.param_rows_cache;
     if rows.is_empty() {
         let lines = vec![
             Line::from(Span::styled(

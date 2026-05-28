@@ -269,14 +269,28 @@ fn run(
     }
 
     while !app.should_quit {
-        terminal.draw(|f| ui::draw(f, &mut app))?;
-
+        // Drain first so background results are reflected in the frame
+        // we're about to draw (instead of one frame late).
         app.drain_events();
+
+        // Event-driven redraw: only rebuild the frame when something
+        // actually changed. Idle iterations cost nothing instead of
+        // re-rendering ~10x/s. There is no animation in the app, so
+        // pure event-gating is correct.
+        if app.needs_redraw {
+            terminal.draw(|f| ui::draw(f, &mut app))?;
+            app.needs_redraw = false;
+        }
 
         if event::poll(Duration::from_millis(100))? {
             match event::read()? {
                 Event::Key(key) => app.on_key(key),
+                // `on_mouse` flags `needs_redraw` for the events it
+                // actually handles, so clicks/scrolls repaint.
                 Event::Mouse(mouse) => app.on_mouse(mouse),
+                // A resize invalidates the whole frame; without this the
+                // gated loop would never repaint after a resize.
+                Event::Resize(_, _) => app.needs_redraw = true,
                 _ => {}
             }
         }

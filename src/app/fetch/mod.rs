@@ -18,6 +18,9 @@ impl App {
     /// Drain background events and apply them to app state.
     pub fn drain_events(&mut self) {
         while let Ok(ev) = self.events_rx.try_recv() {
+            // A handled background event can change any visible state;
+            // repaint on the next loop iteration.
+            self.needs_redraw = true;
             self.handle_event(ev);
         }
     }

@@ -21,6 +21,9 @@ mod trace;
 
 impl App {
     pub fn on_key(&mut self, key: KeyEvent) {
+        // Any keystroke may mutate state; flag a repaint up front so
+        // every early-return path below still triggers a redraw.
+        self.needs_redraw = true;
         // Overlays own their keymap entirely when visible; checked
         // before pane / mode dispatch so motion keys don't bleed
         // through. Picker > time > help > dashinfo > tile-inspect.

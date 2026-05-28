@@ -2,6 +2,33 @@
 
 use super::*;
 use ::time;
+use crossterm::event::KeyCode;
+
+#[test]
+fn fresh_app_requests_initial_redraw() {
+    let app = test_app();
+    assert!(app.needs_redraw, "first frame must always draw");
+}
+
+#[test]
+fn on_key_requests_redraw_even_on_dismiss_paths() {
+    let mut app = test_app();
+    app.needs_redraw = false;
+    // An overlay-dismiss key returns early inside `on_key`; the flag is
+    // set up front so even that path repaints.
+    app.help.visible = true;
+    app.on_key(key(KeyCode::Esc));
+    assert!(app.needs_redraw, "any key must request a repaint");
+}
+
+#[test]
+fn drain_events_requests_redraw_when_an_event_is_handled() {
+    let mut app = test_app();
+    app.needs_redraw = false;
+    // No pending events: drain is a no-op and must not force a redraw.
+    app.drain_events();
+    assert!(!app.needs_redraw, "idle drain must not request a repaint");
+}
 
 #[test]
 fn run_query_blocked_by_error_diagnostic_keeps_busy_unset() {

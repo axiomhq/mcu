@@ -489,8 +489,7 @@ impl App {
                 self.unit = unit;
             }
         } else {
-            let series = self.series.clone();
-            self.unit = self.resolve_live_unit_from_buffer(text, &series);
+            self.unit = self.resolve_live_unit_from_buffer(text, &self.series);
         }
     }
 

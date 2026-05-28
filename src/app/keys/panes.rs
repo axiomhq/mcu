@@ -164,6 +164,7 @@ impl App {
             (Char('x'), M::NONE) => {
                 if let Some(row) = rows.get(self.params.selected).cloned() {
                     self.status = if self.params.cli.remove(&row.name).is_some() {
+                        self.refresh_param_rows();
                         format!("cleared ${}", row.name)
                     } else {
                         format!("${} not set", row.name)

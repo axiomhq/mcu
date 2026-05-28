@@ -84,6 +84,11 @@ pub struct App {
     pub last_error: Option<String>,
     pub should_quit: bool,
     pub busy: bool,
+    /// Set whenever app state changes in a way that needs a repaint
+    /// (any key, any drained background event, terminal resize). The
+    /// main loop draws only when this is set, then clears it, so idle
+    /// frames cost nothing instead of redrawing ~10x/s.
+    pub needs_redraw: bool,
     /// Shared discovery cache; persisted to disk by background tasks.
     pub cache: Arc<RwLock<Cache>>,
     /// App-private settings (trace defaults today; future UI/picker
@@ -104,6 +109,10 @@ pub struct App {
     /// Live diagnostics for the current buffer.
     /// Recomputed by [`App::recompute_diagnostics`] on every buffer-mutating key.
     pub diagnostics: Vec<mpl::Diagnostic>,
+    /// Cached params-pane rows for the render path. Recomputed by
+    /// [`App::recompute_diagnostics`] and [`App::refresh_param_rows`]
+    /// so `draw_params` never runs a full MPL compile per frame.
+    pub param_rows_cache: Vec<crate::params::ParamRow>,
     /// Trace identifier of the most recently completed query, surfaced on the
     /// right of the status bar so users can correlate against server logs.
     /// `None` before the first run or when the response carried no trace.
@@ -454,11 +463,13 @@ impl App {
             status,
             should_quit: false,
             busy: false,
+            needs_redraw: true,
             cache,
             settings: Arc::new(RwLock::new(settings)),
             completions: CompletionState::default(),
             quickfix: QuickFixPicker::default(),
             diagnostics: Vec::new(),
+            param_rows_cache: Vec::new(),
             last_trace_id: None,
             help: HelpState::default(),
             hover: None,
@@ -698,6 +709,14 @@ impl App {
         crate::mpl::param_rows(&self.query_text(), &self.params.system, &self.params.cli)
     }
 
+    /// Recompute [`Self::param_rows_cache`] after a params mutation
+    /// (`:p`, params-pane `x`) that doesn't run the full diagnostics
+    /// pass, keeping the render-path cache in sync without a recompile
+    /// on the draw path.
+    pub(crate) fn refresh_param_rows(&mut self) {
+        self.param_rows_cache = self.param_rows();
+    }
+
     /// Write the current `legend_label_tags` to the cache and flush
     /// to disk. Two keying modes:
     ///
@@ -850,8 +869,12 @@ impl App {
         } else {
             self.diagnostics.clear();
         }
+        // Refresh the render-path cache here (reusing `text`) so the
+        // params pane never recompiles MPL on the draw path.
+        self.param_rows_cache =
+            crate::mpl::param_rows(&text, &self.params.system, &self.params.cli);
         self.sync_dashboard_from_buffer(&text);
-        self.recompute_sig_help();
+        self.recompute_sig_help_with(&text);
         self.sync_buffer_to_focused_tile();
         self.sync_live_unit_from_buffer(&text);
     }
@@ -860,6 +883,14 @@ impl App {
     /// Cheap (single backwards byte scan + one stdlib lookup); fine to call
     /// on every keystroke and cursor move.
     pub fn recompute_sig_help(&mut self) {
+        let text = self.query_text();
+        self.recompute_sig_help_with(&text);
+    }
+
+    /// As [`Self::recompute_sig_help`] but reuses an already-computed
+    /// buffer string so the per-keystroke path doesn't allocate the
+    /// buffer a second time.
+    fn recompute_sig_help_with(&mut self, text: &str) {
         // APL buffers don't have MPL signature data — suppress so
         // an APL `summarize(...)` doesn't display the unrelated MPL
         // `summarize` signature.
@@ -867,9 +898,8 @@ impl App {
             self.sig_help = None;
             return;
         }
-        let text = self.query_text();
         let cursor = editor_cursor_byte_offset(&self.editor);
-        self.sig_help = hover::find_call_context(&text, cursor);
+        self.sig_help = hover::find_call_context(text, cursor);
     }
 }
 

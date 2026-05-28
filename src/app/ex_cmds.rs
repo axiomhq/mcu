@@ -173,6 +173,7 @@ impl App {
         if clear_all {
             let n = self.params.cli.len();
             self.params.cli.clear();
+            self.refresh_param_rows();
             self.status = format!("cleared {n} param(s)");
             return;
         }
@@ -203,6 +204,7 @@ impl App {
         }
         if value.is_empty() {
             if self.params.cli.remove(name).is_some() {
+                self.refresh_param_rows();
                 self.status = format!("cleared ${name}");
             } else {
                 self.status = format!("${name} not set");
@@ -217,6 +219,7 @@ impl App {
             return;
         }
         self.params.cli.insert(name.to_string(), value.to_string());
+        self.refresh_param_rows();
         self.status = format!("set ${name}={value}");
     }
 

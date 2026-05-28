@@ -81,7 +81,7 @@ pub enum ParamStatus {
 }
 
 /// One row in the params pane.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParamRow {
     /// Without leading `$`.
     pub name: String,

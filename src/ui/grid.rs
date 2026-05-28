@@ -32,14 +32,15 @@ pub(super) const NOTE_ROW_HEIGHT: u32 = 2;
 /// graph pane, draws a bordered chrome block per tile, and highlights
 /// the currently-selected one in yellow.
 pub(super) fn draw_dashboard_grid(f: &mut Frame, app: &mut App, area: Rect) {
-    // Resolve everything we need from `loaded_dashboard` up front so
-    // we can drop the borrow before mutating `app.dashboard_scroll`.
-    let Some(resource) = app.loaded_dashboard.as_ref() else {
+    // `loaded_dashboard` is read through several short-lived shared
+    // borrows below rather than cloned up front: the only `&mut` we
+    // need is the `dashboard_scroll` write, which is sequenced between
+    // the layout-math borrow and the tile-render borrow. Cloning
+    // `charts` + `layout` every frame (the previous approach) was pure
+    // borrow-checker appeasement and deep-cloned every tile per redraw.
+    if app.loaded_dashboard.is_none() {
         return;
-    };
-    let charts = resource.dashboard.charts.clone();
-    let layout = resource.dashboard.layout.clone();
-    let dash_name = resource.name_or_unnamed().to_string();
+    }
 
     // Outer frame for the whole dashboard pane.
     let focused = app.focus == crate::app::Pane::Dashboard;
@@ -62,18 +63,31 @@ pub(super) fn draw_dashboard_grid(f: &mut Frame, app: &mut App, area: Rect) {
         } => " OPEN↑",
     };
     let dirty_pip = if app.dashboard_dirty { " [+]" } else { "" };
+    let dash_name = app
+        .loaded_dashboard
+        .as_ref()
+        .unwrap()
+        .name_or_unnamed()
+        .to_string();
+    let charts_len = app
+        .loaded_dashboard
+        .as_ref()
+        .unwrap()
+        .dashboard
+        .charts
+        .len();
     let title = format!(
         " dashboard · {}{}{} · {} tile(s) · [{}/{}] ",
         dash_name,
         dirty_pip,
         submode_badge,
-        charts.len(),
-        if charts.is_empty() {
+        charts_len,
+        if charts_len == 0 {
             0
         } else {
             app.selected_chart_idx + 1
         },
-        charts.len()
+        charts_len
     );
     let outer = pane_block(&title, focused);
     let pane_inner = outer.inner(area);
@@ -82,7 +96,7 @@ pub(super) fn draw_dashboard_grid(f: &mut Frame, app: &mut App, area: Rect) {
     // render loop below; left empty on the early-return paths so a
     // click can't match a tile that wasn't drawn.
     app.mouse_geom.grid_tiles.clear();
-    if pane_inner.width < 4 || pane_inner.height < 3 || charts.is_empty() {
+    if pane_inner.width < 4 || pane_inner.height < 3 || charts_len == 0 {
         f.render_widget(
             Paragraph::new("(no tiles to render)")
                 .style(Style::default().fg(Color::DarkGray))
@@ -105,44 +119,49 @@ pub(super) fn draw_dashboard_grid(f: &mut Frame, app: &mut App, area: Rect) {
     // The wire layout uses a 12-column virtual grid (server spec).
     let col_w_f = viewport.width as f32 / 12.0;
 
-    // Total virtual-grid rows = max(y + h) over the *resolved* slot of
-    // every chart. Resolving through `resolve_slot` (rather than just
-    // the `layout` entries) is what keeps `row_tops` big enough for
-    // auto-stacked charts: a chart with no matching `LayoutItem` gets
-    // an auto-stack slot at `gy = (idx/2)*6`, which can sit below the
-    // last `layout` row. Indexing `row_tops` with that slot used to
-    // panic when `layout` was non-empty but didn't cover every chart.
-    let virt_rows = charts
-        .iter()
-        .enumerate()
-        .map(|(i, c)| {
-            let (_, gy, _, gh) = resolve_slot(&layout, c, i);
-            gy + gh
-        })
-        .max()
-        .unwrap_or(6)
-        .max(1);
-
-    // Per-virt-row variable heights: a row that hosts only Note
-    // tiles shrinks to `NOTE_ROW_HEIGHT`, everything else gets at
-    // least `MIN_GRID_ROW_HEIGHT`. Surplus space (when the layout
-    // would otherwise leave the viewport bottom empty) is given to
-    // non-Note rows so Notes stay compact.
-    let row_heights =
-        compute_row_heights(&charts, &layout, virt_rows as usize, viewport.height as u32);
-    let mut row_tops: Vec<u32> = Vec::with_capacity(row_heights.len() + 1);
-    let mut acc = 0u32;
-    row_tops.push(0);
-    for h in &row_heights {
-        acc = acc.saturating_add(*h);
-        row_tops.push(acc);
-    }
-    let content_h = acc;
+    // Phase 1 — layout math under one shared borrow. Produces only
+    // small derived vectors/scalars, never a `Chart` clone.
+    //
+    // `virt_rows` resolves through `resolve_slot` (rather than just the
+    // `layout` entries) so `row_tops` stays big enough for auto-stacked
+    // charts: a chart with no matching `LayoutItem` gets an auto-stack
+    // slot at `gy = (idx/2)*6`, which can sit below the last `layout`
+    // row. Indexing `row_tops` with that slot used to panic when
+    // `layout` was non-empty but didn't cover every chart.
+    let (row_tops, content_h, max_scroll, needs_scroll) = {
+        let resource = app.loaded_dashboard.as_ref().unwrap();
+        let charts = &resource.dashboard.charts;
+        let layout = &resource.dashboard.layout;
+        let virt_rows = charts
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let (_, gy, _, gh) = resolve_slot(layout, c, i);
+                gy + gh
+            })
+            .max()
+            .unwrap_or(6)
+            .max(1);
+        // Per-virt-row variable heights: a row that hosts only Note
+        // tiles shrinks to `NOTE_ROW_HEIGHT`, everything else gets at
+        // least `MIN_GRID_ROW_HEIGHT`. Surplus space is given to
+        // non-Note rows so Notes stay compact.
+        let row_heights =
+            compute_row_heights(charts, layout, virt_rows as usize, viewport.height as u32);
+        let mut row_tops: Vec<u32> = Vec::with_capacity(row_heights.len() + 1);
+        let mut acc = 0u32;
+        row_tops.push(0);
+        for h in &row_heights {
+            acc = acc.saturating_add(*h);
+            row_tops.push(acc);
+        }
+        let content_h = acc;
+        let max_scroll = content_h.saturating_sub(viewport.height as u32) as u16;
+        (row_tops, content_h, max_scroll, max_scroll > 0)
+    };
 
     // Scrolling math. If everything fits, no scrollbar; otherwise
     // reclaim the gutter and clamp `dashboard_scroll`.
-    let max_scroll = content_h.saturating_sub(viewport.height as u32) as u16;
-    let needs_scroll = max_scroll > 0;
     let viewport = if needs_scroll {
         viewport
     } else {
@@ -153,59 +172,81 @@ pub(super) fn draw_dashboard_grid(f: &mut Frame, app: &mut App, area: Rect) {
         }
     };
 
-    // Auto-scroll: bring the selected tile fully into view. Uses
-    // the variable row-heights so a tile under a shrunken Note row
-    // still maps to the right terminal coordinates.
+    // Phase 2 — auto-scroll target, then the single `&mut` write.
+    // Bring the selected tile fully into view, using the variable
+    // row-heights so a tile under a shrunken Note row still maps to
+    // the right terminal coordinates.
     let last_row_top = row_tops.len() - 1;
-    if let Some(chart) = charts.get(app.selected_chart_idx) {
-        let (_, gy, _, gh) = resolve_slot(&layout, chart, app.selected_chart_idx);
-        // Defensive clamp: `virt_rows` already covers every chart's
-        // resolved slot, so these never saturate in practice.
-        let top = row_tops[(gy as usize).min(last_row_top)] as u16;
-        let bot = row_tops[((gy + gh) as usize).min(last_row_top)] as u16;
-        if top < app.dashboard_scroll {
-            app.dashboard_scroll = top;
-        } else if bot > app.dashboard_scroll.saturating_add(viewport.height) {
-            app.dashboard_scroll = bot.saturating_sub(viewport.height);
+    let mut new_scroll = app.dashboard_scroll;
+    {
+        let resource = app.loaded_dashboard.as_ref().unwrap();
+        let layout = &resource.dashboard.layout;
+        if let Some(chart) = resource.dashboard.charts.get(app.selected_chart_idx) {
+            let (_, gy, _, gh) = resolve_slot(layout, chart, app.selected_chart_idx);
+            // Defensive clamp: `virt_rows` already covers every chart's
+            // resolved slot, so these never saturate in practice.
+            let top = row_tops[(gy as usize).min(last_row_top)] as u16;
+            let bot = row_tops[((gy + gh) as usize).min(last_row_top)] as u16;
+            if top < new_scroll {
+                new_scroll = top;
+            } else if bot > new_scroll.saturating_add(viewport.height) {
+                new_scroll = bot.saturating_sub(viewport.height);
+            }
         }
     }
-    app.dashboard_scroll = app.dashboard_scroll.min(max_scroll);
-    let scroll = app.dashboard_scroll as u32;
+    new_scroll = new_scroll.min(max_scroll);
+    app.dashboard_scroll = new_scroll;
+    let scroll = new_scroll as u32;
 
-    // Render each tile, clipping to the viewport. Tiles entirely
-    // outside are skipped; tiles partially outside get their
+    // Phase 3 — render each tile, clipping to the viewport. Tiles
+    // entirely outside are skipped; tiles partially outside get their
     // remaining visible band drawn (chrome at the clipped edge is
-    // truncated, which is the conventional scroll behaviour).
-    for (i, chart) in charts.iter().enumerate() {
-        let (gx, gy, gw, gh) = resolve_slot(&layout, chart, i);
-        let content_top = row_tops[(gy as usize).min(last_row_top)];
-        let content_bot = row_tops[((gy + gh) as usize).min(last_row_top)];
-        let viewport_top = scroll;
-        let viewport_bot = scroll.saturating_add(viewport.height as u32);
-        if content_bot <= viewport_top || content_top >= viewport_bot {
-            continue;
-        }
-        let vis_top = content_top.max(viewport_top);
-        let vis_bot = content_bot.min(viewport_bot);
-        let y = viewport.y + (vis_top - viewport_top) as u16;
-        let h = (vis_bot - vis_top) as u16;
+    // truncated, the conventional scroll behaviour). The
+    // `&app.loaded_dashboard` borrow and the `&App` handed to
+    // `draw_grid_tile` are both shared, so they coexist without
+    // cloning.
+    // Collect tile hit-rects in a local while the shared borrow of
+    // `loaded_dashboard` is live, then write them into `mouse_geom`
+    // after the borrow ends — `draw_grid_tile` takes `&App`, so a
+    // `&mut self.mouse_geom` push inside this block would conflict
+    // with the `resource` borrow.
+    let mut tile_hits: Vec<(usize, Rect)> = Vec::new();
+    {
+        let resource = app.loaded_dashboard.as_ref().unwrap();
+        let charts = &resource.dashboard.charts;
+        let layout = &resource.dashboard.layout;
+        for (i, chart) in charts.iter().enumerate() {
+            let (gx, gy, gw, gh) = resolve_slot(layout, chart, i);
+            let content_top = row_tops[(gy as usize).min(last_row_top)];
+            let content_bot = row_tops[((gy + gh) as usize).min(last_row_top)];
+            let viewport_top = scroll;
+            let viewport_bot = scroll.saturating_add(viewport.height as u32);
+            if content_bot <= viewport_top || content_top >= viewport_bot {
+                continue;
+            }
+            let vis_top = content_top.max(viewport_top);
+            let vis_bot = content_bot.min(viewport_bot);
+            let y = viewport.y + (vis_top - viewport_top) as u16;
+            let h = (vis_bot - vis_top) as u16;
 
-        let x = viewport.x + (gx as f32 * col_w_f) as u16;
-        let w = ((gw as f32 * col_w_f) as u16).max(3);
-        let w = w.min(viewport.width.saturating_sub(x - viewport.x));
-        if w < 3 || h < 3 {
-            continue;
+            let x = viewport.x + (gx as f32 * col_w_f) as u16;
+            let w = ((gw as f32 * col_w_f) as u16).max(3);
+            let w = w.min(viewport.width.saturating_sub(x - viewport.x));
+            if w < 3 || h < 3 {
+                continue;
+            }
+            let rect = Rect {
+                x,
+                y,
+                width: w,
+                height: h,
+            };
+            let selected = i == app.selected_chart_idx;
+            tile_hits.push((i, rect));
+            draw_grid_tile(f, app, chart, rect, selected && focused);
         }
-        let rect = Rect {
-            x,
-            y,
-            width: w,
-            height: h,
-        };
-        let selected = i == app.selected_chart_idx;
-        app.mouse_geom.grid_tiles.push((i, rect));
-        draw_grid_tile(f, app, chart, rect, selected && focused);
     }
+    app.mouse_geom.grid_tiles = tile_hits;
 
     // Scrollbar in the reserved gutter column.
     if needs_scroll {

@@ -36,6 +36,10 @@ impl App {
         // the dismiss-on-any-key overlays, dismisses) rather than
         // bleeding through to the pane underneath.
         if self.mouse_blocked_by_overlay() {
+            // An overlay consumed the click (and may have dismissed
+            // itself); repaint so any dismissal is reflected under the
+            // event-gated render loop.
+            self.needs_redraw = true;
             return;
         }
 
@@ -45,8 +49,13 @@ impl App {
             MouseEventKind::ScrollDown => self.on_mouse_scroll(col, row, SCROLL_STEP),
             MouseEventKind::ScrollUp => self.on_mouse_scroll(col, row, -SCROLL_STEP),
             // Drag / move / release / other buttons: ignored in v1.
-            _ => {}
+            // Returning early avoids repainting on high-frequency
+            // motion events the gated loop would otherwise redraw on.
+            _ => return,
         }
+        // A handled click/scroll may have mutated state; flag a repaint
+        // up front the same way `on_key` does.
+        self.needs_redraw = true;
     }
 
     /// Mirror of the overlay precedence in `on_key`. Returns `true`
