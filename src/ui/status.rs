@@ -10,6 +10,30 @@ use ratatui::{
 
 use crate::app::{App, Mode};
 
+/// Resolve which trace id the status bar should show.
+///
+/// In dashboard Grid view the focused tile owns the displayed trace, so
+/// navigating between tiles updates the status to *that* tile's query
+/// rather than the editor's last fetch. Outside Grid we fall back to
+/// `last_trace_id` (the editor's MPL/APL or solo-tile query). We do
+/// **not** fall back inside Grid — a tile that hasn't returned yet
+/// should display no trace at all, otherwise the user sees a stale
+/// trace from the editor or a previously-focused tile and copies the
+/// wrong id into support.
+pub(crate) fn status_trace_id(app: &App) -> Option<String> {
+    if app.view_mode == crate::app::ViewMode::Grid
+        && let Some(resource) = app.loaded_dashboard.as_ref()
+        && let Some(chart) = resource.dashboard.charts.get(app.selected_chart_idx)
+        && let Some(base) = chart.base()
+    {
+        return app
+            .tile_results
+            .get(&base.id)
+            .and_then(|t| t.trace_id.clone());
+    }
+    app.last_trace_id.clone()
+}
+
 pub(super) fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     // Command mode replaces the status line entirely with a `:` prompt.
     if app.mode == Mode::Command {
@@ -104,7 +128,7 @@ pub(super) fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     if let Some(resource) = app.loaded_dashboard.as_ref() {
         right_parts.push(format!("dash: {}", resource.uid));
     }
-    if let Some(t) = app.last_trace_id.as_deref() {
+    if let Some(t) = status_trace_id(app) {
         right_parts.push(format!("trace: {t}"));
     }
     let right_text = right_parts.join("  ");

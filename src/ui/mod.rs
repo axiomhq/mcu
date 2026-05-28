@@ -40,6 +40,11 @@ mod status;
 mod time_picker;
 mod topbar;
 
+// Re-exported so unit tests in `app::tests` can assert the resolver
+// without rendering a frame.
+#[cfg(test)]
+pub(crate) use status::status_trace_id;
+
 // Soft caps for the secondary panes so they don't eat huge chunks of
 // big terminals just to display a handful of lines/items. The
 // percentage acts as a target on small screens; the absolute cap

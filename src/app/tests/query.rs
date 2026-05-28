@@ -386,6 +386,67 @@ fn trace_command_in_grid_reports_pending_when_tile_has_no_result() {
     );
 }
 
+// ---- Status-bar trace id resolver ------------------------------------
+//
+// The status bar must mirror `:trace` semantics: in Grid view the
+// focused tile's trace wins; outside Grid `last_trace_id` wins; in
+// Grid with no tile result we display nothing rather than falling
+// back to a stale editor trace.
+
+#[test]
+fn status_trace_id_outside_grid_uses_last_trace_id() {
+    let mut app = test_app();
+    app.last_trace_id = Some("editor-trace".into());
+    assert_eq!(
+        crate::ui::status_trace_id(&app).as_deref(),
+        Some("editor-trace")
+    );
+}
+
+#[test]
+fn status_trace_id_in_grid_prefers_focused_tile_trace() {
+    let mut app = test_app();
+    app.handle_event(AppEvent::DashboardOpened {
+        uid: "u".into(),
+        result: Ok(multi_chart_resource()),
+    });
+    let chart_id = app.loaded_dashboard.as_ref().unwrap().dashboard.charts[0]
+        .base()
+        .expect("test fixture is Chart::Known")
+        .id
+        .clone();
+    let mut resp = one_series_response("x");
+    resp.trace_id = Some("tile-trace-9".into());
+    app.tile_results
+        .insert(chart_id.clone(), Default::default());
+    app.handle_event(AppEvent::TileQueryFinished {
+        chart_id,
+        epoch: app.tile_query_epoch,
+        result: Ok(resp),
+    });
+    // The editor's trace is a red herring — the status bar must show
+    // the focused tile's, not this one.
+    app.last_trace_id = Some("editor-trace".into());
+    assert_eq!(
+        crate::ui::status_trace_id(&app).as_deref(),
+        Some("tile-trace-9")
+    );
+}
+
+#[test]
+fn status_trace_id_in_grid_returns_none_when_tile_pending() {
+    let mut app = test_app();
+    app.handle_event(AppEvent::DashboardOpened {
+        uid: "u".into(),
+        result: Ok(multi_chart_resource()),
+    });
+    // No TileQueryFinished delivered — the focused tile has no result
+    // yet. Falling back to last_trace_id here would display the
+    // editor's trace and re-introduce the bug.
+    app.last_trace_id = Some("editor-trace".into());
+    assert_eq!(crate::ui::status_trace_id(&app), None);
+}
+
 // ---- Per-tile elapsed-time bookkeeping --------------------------------
 
 #[test]
