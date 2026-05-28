@@ -30,6 +30,7 @@ application fully functional on its own: buildable, runnable, and improved over 
 23. [Step 23 — Waterfall bars + detail pane + virtualization](plan/23-trace-waterfall-and-detail.md)
 24. [Step 24 — Folds + `/` filter + service jump + yank/inspect](plan/24-trace-interaction-polish.md)
 25. [Step 25 — `:traces ls` picker + per-dataset cache](plan/25-traces-picker.md)
+26. [Step 26 — Codebase review remediation (bugs, waste, duplication, maintainability)](plan/26-review-remediation.md)
 
 Steps 11–16 add the remaining Axiom dashboard element types (bar / area /
 scatter / statistic / top list / pie / heatmap / table / log stream /
