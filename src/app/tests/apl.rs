@@ -1,6 +1,6 @@
 //! Phase 1 APL-language coverage:
 //!
-//! * `extract_query` honours the `mcuLang` sidecar over chart kind.
+//! * `extract_query` honours the `axLang` sidecar over chart kind.
 //! * `:apl` / `:mpl` flip the focused tile's query-object key and
 //!   stamp the sidecar (or just flip `buffer_lang` in standalone).
 //! * `:tile add <kind> apl` inserts a tile pre-marked as APL.
@@ -53,10 +53,10 @@ fn dashboard_with_chart(chart: crate::axiom::Chart) -> crate::axiom::DashboardSu
 
 #[test]
 fn sidecar_apl_on_metrics_chart_overrides_kind_default() {
-    // A TimeSeries chart with the `mcuLang=apl` sidecar must classify
+    // A TimeSeries chart with the `axLang=apl` sidecar must classify
     // as APL even though the chart-kind fallback would say MPL. This
     // is the whole point of the sidecar: deterministic language on
-    // tiles mcu authored.
+    // tiles ax authored.
     let chart =
         timeseries_with_query_and_lang(serde_json::json!({ "apl": "['logs'] | count" }), Lang::Apl);
     assert!(matches!(extract_query(&chart), Query::Apl(_)));
@@ -113,7 +113,7 @@ fn cmd_lang_in_dashboard_mode_rewrites_key_and_stamps_sidecar() {
     // Adopt a one-chart dashboard with an MPL TimeSeries tile, then
     // `:apl`. Expected:
     //   * the query object now has the `apl` key, not `mpl`,
-    //   * `chart.extras["mcuLang"] == "apl"`,
+    //   * `chart.extras["axLang"] == "apl"`,
     //   * dashboard_dirty flips to true.
     let mut app = test_app();
     let resource = dashboard_with_chart(timeseries_with_query(
@@ -279,7 +279,7 @@ fn normalize_queries_to_wire_leaves_apl_keyed_queries_alone() {
         q1.get("apl").and_then(|v| v.as_str()),
         Some("['logs'] | count")
     );
-    // Both charts: the `mcuLang` sidecar must have been scrubbed.
+    // Both charts: the `axLang` sidecar must have been scrubbed.
     // (Phase-1 stamped it via `timeseries_with_query_and_lang`; if
     // it leaked into the wire payload the Axiom server's PUT
     // schema validator would reject the request with an unknown-key
@@ -293,7 +293,7 @@ fn normalize_queries_to_wire_leaves_apl_keyed_queries_alone() {
                 .extras
                 .get(crate::dashboard::LANG_SIDECAR_KEY)
                 .is_none(),
-            "mcuLang sidecar leaked into wire payload",
+            "axLang sidecar leaked into wire payload",
         );
     }
 }

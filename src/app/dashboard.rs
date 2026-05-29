@@ -326,7 +326,7 @@ impl App {
     /// pragma line. Returns `None` for `Query::Empty` (caller leaves
     /// the editor untouched). Both MPL and APL queries seed as raw
     /// text — the language is tracked separately (via the chart's
-    /// `mcuLang` sidecar or `App.buffer_lang`) and surfaced in the
+    /// `axLang` sidecar or `App.buffer_lang`) and surfaced in the
     /// status bar so the user always knows which dialect they're in.
     pub(super) fn build_query_seed(
         pragma_line: &str,

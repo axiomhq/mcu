@@ -121,7 +121,7 @@ fn real_home_overview_mpl_timeseries_classifies_as_mpl() {
 #[test]
 fn bracket_apl_text_on_timeseries_chart_classifies_as_apl() {
     // Foreign-authored APL on a metrics chart (Axiom web UI lets
-    // users write APL on any chart kind). No `mcuLang` sidecar, so
+    // users write APL on any chart kind). No `axLang` sidecar, so
     // the layered detector falls through to the narrow syntax
     // sniff in `extract_query` — the leading `[` is unambiguously
     // APL (MPL grammar never starts with a bracket), so the chart

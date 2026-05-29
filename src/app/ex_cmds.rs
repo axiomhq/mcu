@@ -280,7 +280,7 @@ impl App {
     /// `:apl` / `:mpl` — flip the current edit context's language.
     ///
     /// In dashboard mode this rewrites the focused tile's query-object
-    /// key (`mpl` ↔ `apl`), stamps the `mcuLang` sidecar so the next
+    /// key (`mpl` ↔ `apl`), stamps the `axLang` sidecar so the next
     /// reload classifies deterministically, and marks the dashboard
     /// dirty. In standalone MPL-buffer mode it flips
     /// [`App::buffer_lang`] for the duration of the session.

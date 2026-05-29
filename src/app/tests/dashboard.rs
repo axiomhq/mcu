@@ -188,7 +188,7 @@ fn dashboard_open_adopts_internal_dashboard_and_seeds_mpl_buffer() {
 fn dashboard_open_with_logstream_apl_seeds_raw_apl_text() {
     // Since APL execution landed, APL tiles seed as raw editable
     // text (no `//` comment prefix). The language is tracked via
-    // the chart's `mcuLang` sidecar / `App.buffer_lang` and
+    // the chart's `axLang` sidecar / `App.buffer_lang` and
     // surfaced in the status bar; the buffer itself is just the
     // APL query the user can type into directly.
     //

@@ -13,7 +13,7 @@
 use crate::axiom::{Chart, ChartBase, DashboardSummary, KnownChart};
 
 /// Sidecar key on `ChartBase.extras` that records the query language
-/// mcu wrote for a tile. Lets [`extract_query`] reach a deterministic
+/// ax wrote for a tile. Lets [`extract_query`] reach a deterministic
 /// verdict on tiles we authored without falling back to chart-kind
 /// heuristics — flip a Statistic chart to APL with `:apl` and the
 /// next reload still classifies it as APL even though the chart kind
@@ -22,7 +22,7 @@ use crate::axiom::{Chart, ChartBase, DashboardSummary, KnownChart};
 /// Foreign-authored charts (Axiom web UI, other tools) won't carry
 /// this; they fall through to the kind-based rules below. Round-trips
 /// because [`ChartBase.extras`] is a serde passthrough.
-pub const LANG_SIDECAR_KEY: &str = "mcuLang";
+pub const LANG_SIDECAR_KEY: &str = "axLang";
 
 /// Query language a tile is authored in. The discriminator that
 /// [`extract_query`] returns alongside the query text.
@@ -60,7 +60,7 @@ impl Lang {
     }
 }
 
-/// Read the explicit-language sidecar from a chart, if mcu wrote one.
+/// Read the explicit-language sidecar from a chart, if ax wrote one.
 /// Returns `None` for foreign charts that never carried the marker.
 fn lang_from_sidecar(chart: &Chart) -> Option<Lang> {
     let base = chart.base()?;
@@ -273,14 +273,14 @@ pub enum Query {
 /// stdlib are subsets of what the Axiom server accepts, so valid
 /// real-world MPL routinely failed the local check, flipped to
 /// `Query::Apl`, and rendered as the "not yet executable" banner
-/// with no data. The sidecar lets mcu-authored tiles claim a
+/// with no data. The sidecar lets ax-authored tiles claim a
 /// language explicitly; everything else falls through to the
 /// kind-based rules.
 ///
 /// Rules (in order):
-///   1. `chart.extras["mcuLang"] == "apl"` → `Query::Apl` (mcu wrote
+///   1. `chart.extras["axLang"] == "apl"` → `Query::Apl` (ax wrote
 ///      this tile and stamped its language).
-///   2. `chart.extras["mcuLang"] == "mpl"` → `Query::Mpl`.
+///   2. `chart.extras["axLang"] == "mpl"` → `Query::Mpl`.
 ///   3. Explicit `mpl` key on the query object → `Query::Mpl`.
 ///      Set by local edits in
 ///      [`crate::app::App::sync_buffer_to_focused_tile`] for MPL

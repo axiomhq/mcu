@@ -92,21 +92,21 @@ fn install_panic_hook() {
 
 /// Parsed command-line arguments.
 ///
-/// With no subcommand, `mcu [FILE.mpl]` opens an editor (the
+/// With no subcommand, `ax [FILE.mpl]` opens an editor (the
 /// historical default). The `trace` / `dashboard` subcommands open a
 /// resource directly on startup. `infer_subcommands` lets them be
-/// abbreviated to any unambiguous prefix (`mcu tr <id>`,
-/// `mcu da <uid>`).
+/// abbreviated to any unambiguous prefix (`ax tr <id>`,
+/// `ax da <uid>`).
 #[derive(Debug, Default, Parser)]
 #[command(
-    name = "mcu",
+    name = "ax",
     version,
     about = "Vim-style TUI editor and dashboard for the Axiom metrics service.",
     long_about = "With no subcommand, FILE.mpl is opened on startup (created on `:w` if missing).\n\
                   Subcommands open a resource directly:\n  \
-                  mcu trace <id>       open a trace\n  \
-                  mcu dashboard <uid>  open a dashboard\n\
-                  Subcommand names may be abbreviated when unambiguous (e.g. `mcu tr <id>`).",
+                  ax trace <id>       open a trace\n  \
+                  ax dashboard <uid>  open a dashboard\n\
+                  Subcommand names may be abbreviated when unambiguous (e.g. `ax tr <id>`).",
     infer_subcommands = true
 )]
 pub struct CliArgs {
@@ -287,7 +287,7 @@ mod tests {
     /// Run the real production parser against an argv slice (clap
     /// expects argv[0] to be the program name).
     fn parse(args: &[&str]) -> std::result::Result<CliArgs, String> {
-        let mut argv = vec!["mcu"];
+        let mut argv = vec!["ax"];
         argv.extend_from_slice(args);
         let mut cli = CliArgs::try_parse_from(argv).map_err(|e| e.to_string())?;
         cli.build_params();

@@ -88,7 +88,7 @@ pub struct App {
     pub cache: Arc<RwLock<Cache>>,
     /// App-private settings (trace defaults today; future UI/picker
     /// knobs land here). Persisted at
-    /// `$XDG_CONFIG_HOME/mcu/settings.toml`; reads are cheap so
+    /// `$XDG_CONFIG_HOME/ax/settings.toml`; reads are cheap so
     /// `RwLock` lets future background tasks consult it without
     /// blocking the UI thread the way a plain `&mut self` would.
     pub settings: Arc<RwLock<SettingsStore>>,
@@ -336,8 +336,8 @@ impl App {
 
     /// Test-only entry point: in-memory cache, in-memory history,
     /// in-memory settings. Used by `test_app()` so the suite never
-    /// touches the user's real `~/.local/share/mcu/`,
-    /// `~/.cache/mcu/`, or `~/.config/mcu/` directories.
+    /// touches the user's real `~/.local/share/ax/`,
+    /// `~/.cache/ax/`, or `~/.config/ax/` directories.
     #[cfg(test)]
     pub fn with_cache(runtime: Handle, cache: Cache) -> Self {
         Self::with_cache_and_history(
@@ -764,13 +764,13 @@ impl App {
         let text = self.query_text();
         let cache = self.cache.read();
         if let Err(e) = cache.save_query(&text) {
-            eprintln!("mcu: query cache save failed: {e}");
+            eprintln!("ax: query cache save failed: {e}");
         }
         // Persist the buffer language sidecar so the next launch
         // restores `:apl` / `:mpl` state alongside the query text.
         // Best-effort like the text save.
         if let Err(e) = cache.save_query_lang(self.buffer_lang.as_sidecar()) {
-            eprintln!("mcu: query lang sidecar save failed: {e}");
+            eprintln!("ax: query lang sidecar save failed: {e}");
         }
     }
 

@@ -119,7 +119,7 @@ fn draw_log_stream(f: &mut Frame, _opts: &BTreeMap<String, String>, block: Block
         )),
         Line::raw(""),
         Line::from(Span::styled(
-            "log stream rendering not implemented in mcu.",
+            "log stream rendering not implemented in ax.",
             Style::default().fg(Color::DarkGray),
         )),
     ];
@@ -150,7 +150,7 @@ fn draw_monitor_list(
         )),
         Line::raw(""),
         Line::from(Span::styled(
-            "monitor list rendering not implemented in mcu.",
+            "monitor list rendering not implemented in ax.",
             Style::default().fg(Color::DarkGray),
         )),
     ];

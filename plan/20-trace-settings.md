@@ -14,7 +14,7 @@ unit + 1 integration, fmt/clippy clean.
 ## Incremental outcome
 
 A new app-private settings file (separate from `~/.axiom.toml`) holds
-mcu's own preferences. The first two keys it carries are
+ax's own preferences. The first two keys it carries are
 `trace_dataset` and `trace_deployment` — the defaults the upcoming
 trace view (steps 22+) will consult when the user runs `:trace <id>`
 without arguments.
@@ -42,8 +42,8 @@ nothing in the editor / dashboard view consumes them yet.
 ### Add
 
 - `src/settings.rs` — load/save a small TOML at the platform config
-  dir (`etcetera::BaseStrategy::config_dir().join("mcu/settings.toml")`,
-  i.e. `$XDG_CONFIG_HOME/mcu/settings.toml` on Linux). Atomic write
+  dir (`etcetera::BaseStrategy::config_dir().join("ax/settings.toml")`,
+  i.e. `$XDG_CONFIG_HOME/ax/settings.toml` on Linux). Atomic write
   via tempfile + rename, mirroring `cache.rs` / `history.rs`.
 - `App.settings: Arc<RwLock<Settings>>` (same shape as the cache so
   background tasks added later can read without blocking the UI
@@ -69,7 +69,7 @@ nothing in the editor / dashboard view consumes them yet.
 
 ## Settings file shape
 
-`$XDG_CONFIG_HOME/mcu/settings.toml`:
+`$XDG_CONFIG_HOME/ax/settings.toml`:
 
 ```toml
 [trace]
@@ -83,9 +83,9 @@ into its own table without colliding.
 
 ## Why a new file, not `~/.axiom.toml`
 
-`~/.axiom.toml` is shared with the official Axiom CLI; mcu has been
+`~/.axiom.toml` is shared with the official Axiom CLI; ax has been
 careful not to add fields to it. App-specific preferences (especially
-ones the CLI would never read) belong in mcu's own config dir.
+ones the CLI would never read) belong in ax's own config dir.
 Symmetric to `discovery.json` (cache) and `history.json` (state)
 already living under `etcetera` paths.
 

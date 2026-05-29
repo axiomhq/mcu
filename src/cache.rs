@@ -1,7 +1,7 @@
 //! On-disk discovery cache.
 //!
-//! Stored as JSON at `$XDG_CACHE_HOME/mcu/discovery.json` (or
-//! `$HOME/.cache/mcu/discovery.json`). Holds the list of datasets and
+//! Stored as JSON at `$XDG_CACHE_HOME/ax/discovery.json` (or
+//! `$HOME/.cache/ax/discovery.json`). Holds the list of datasets and
 //! per-dataset metric inventories so the app starts with usable state offline
 //! and avoids re-fetching during a session.
 //!
@@ -439,7 +439,7 @@ impl Cache {
     /// `"mpl"`), if a sidecar exists. Missing / malformed yields
     /// `None` and the caller defaults. Decoupled from
     /// [`Self::load_query`] so persistence can be staged: an
-    /// `mcu` build without this sidecar still reads the same
+    /// `ax` build without this sidecar still reads the same
     /// `query.mpl`.
     pub fn load_query_lang(&self) -> Option<String> {
         let path = self.query_meta_path()?;
@@ -492,7 +492,7 @@ fn default_path() -> Option<PathBuf> {
     // ~/Library/Caches on macOS, and %LOCALAPPDATA% on Windows.
     use etcetera::BaseStrategy;
     let strategy = etcetera::choose_base_strategy().ok()?;
-    Some(strategy.cache_dir().join("mcu").join("discovery.json"))
+    Some(strategy.cache_dir().join("ax").join("discovery.json"))
 }
 
 fn read_data_from_disk(p: &Path) -> Option<CacheData> {

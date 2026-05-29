@@ -1,18 +1,18 @@
 //! App-private settings.
 //!
-//! Lives **next to** the rest of mcu's persistent state, not inside
+//! Lives **next to** the rest of ax's persistent state, not inside
 //! `~/.axiom.toml` — that file is shared with the official Axiom CLI
-//! and mcu deliberately doesn't put mcu-only keys in it. Settings
-//! here are mcu's own preferences (trace defaults today; UI/picker
+//! and ax deliberately doesn't put ax-only keys in it. Settings
+//! here are ax's own preferences (trace defaults today; UI/picker
 //! defaults eventually).
 //!
 //! ### On-disk location
 //!
-//! `etcetera::BaseStrategy::config_dir().join("mcu/settings.toml")` —
-//! - Linux:   `$XDG_CONFIG_HOME/mcu/settings.toml`
-//!   (default `~/.config/mcu/settings.toml`)
-//! - macOS:   `~/Library/Application Support/mcu/settings.toml`
-//! - Windows: `%APPDATA%\mcu\settings.toml`
+//! `etcetera::BaseStrategy::config_dir().join("ax/settings.toml")` —
+//! - Linux:   `$XDG_CONFIG_HOME/ax/settings.toml`
+//!   (default `~/.config/ax/settings.toml`)
+//! - macOS:   `~/Library/Application Support/ax/settings.toml`
+//! - Windows: `%APPDATA%\ax\settings.toml`
 //!
 //! Writes go through [`crate::util::atomic::atomic_write_text`] so a
 //! crash mid-write can't leave a torn file (same guarantee `cache.rs`
@@ -77,7 +77,7 @@ impl SettingsStore {
     /// malformed files yield defaults *and* leave the file alone —
     /// the next [`save`](Self::save) re-serialises a valid
     /// document, but we never want a stray byte at startup to wedge
-    /// mcu.
+    /// ax.
     pub fn load() -> Self {
         let path = default_path();
         let data = path.as_deref().and_then(read_from_disk).unwrap_or_default();
@@ -162,7 +162,7 @@ fn normalise(value: Option<String>) -> Option<String> {
 fn default_path() -> Option<PathBuf> {
     use etcetera::BaseStrategy;
     let strategy = etcetera::choose_base_strategy().ok()?;
-    Some(strategy.config_dir().join("mcu").join("settings.toml"))
+    Some(strategy.config_dir().join("ax").join("settings.toml"))
 }
 
 fn read_from_disk(p: &Path) -> Option<Settings> {

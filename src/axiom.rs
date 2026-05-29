@@ -1,9 +1,9 @@
-//! Thin facade over [`axiom_rs`] for the endpoints mcu needs.
+//! Thin facade over [`axiom_rs`] for the endpoints ax needs.
 //!
 //! The bulk of the wire protocol — dashboards (v2), metrics-info, MPL queries
 //! — lives in `axiom-rs` upstream (`../axiom-rs`). This module:
 //!
-//! - re-exports SDK types under their historical mcu names so the
+//! - re-exports SDK types under their historical ax names so the
 //!   rest of the crate doesn't care about the swap,
 //! - keeps a local [`DatasetSummary`] because the SDK's [`axiom_rs::datasets::Dataset`]
 //!   exposes a different subset of fields (no `edgeDeployment`/`kind`),
@@ -66,7 +66,7 @@ impl DashboardSummaryExt for DashboardSummary {
 
 // `Chart::base()` / `Chart::base_mut()` already return `Option<&ChartBase>`
 // because the SDK carries forward-compat `Chart::Unknown` variants holding
-// raw JSON. mcu never builds an Unknown itself (`VizKind::to_chart` only
+// raw JSON. ax never builds an Unknown itself (`VizKind::to_chart` only
 // produces `Chart::Known`), but a fresh server payload with a chart type
 // the SDK doesn't model yet will arrive as `Chart::Unknown`. We keep
 // those tiles in `dashboard.charts` so `:w` round-trips the raw JSON
@@ -117,7 +117,7 @@ impl Client {
 
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
-            .user_agent(concat!("mcu/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("ax/", env!("CARGO_PKG_VERSION")))
             .build()
             .context("building HTTP client")?;
 

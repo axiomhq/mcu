@@ -483,7 +483,7 @@ pub(super) fn cache_save_with<F: FnOnce(&mut Cache)>(cache: &Arc<RwLock<Cache>>,
     let mut c = cache.write();
     f(&mut c);
     if let Err(e) = c.save() {
-        eprintln!("mcu: cache save failed: {e}");
+        eprintln!("ax: cache save failed: {e}");
     }
 }
 

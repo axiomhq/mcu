@@ -1,7 +1,7 @@
 # Key bindings
 
 This file is the single source of truth for the in-app help modal.
-Open it from anywhere in mcu with `?`. Any key dismisses it.
+Open it from anywhere in ax with `?`. Any key dismisses it.
 
 ## Conventions
 

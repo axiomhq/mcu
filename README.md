@@ -1,10 +1,10 @@
-# mcu
+# ax
 
 A terminal interface for querying [Axiom](https://axiom.co). You write
 MPL in a vim-style editor, charts render alongside, and you can browse
 or edit Axiom dashboards inline.
 
-![mcu dashboard view](docs/dashboard.png)
+![ax dashboard view](docs/dashboard.png)
 
 It uses the same `~/.axiom.toml` config file as the official Axiom
 CLI, so if you've already authenticated there, you're done.
@@ -15,7 +15,7 @@ There's no published binary yet. Build from source:
 
 ```sh
 git clone <this-repo>
-cd mcu
+cd ax
 cargo install --path .
 ```
 
@@ -41,19 +41,19 @@ pass `--deployment NAME` (or `-D NAME`); the flag overrides
 
 ## Running
 
-`mcu` opens an empty editor; your last query comes back from
+`ax` opens an empty editor; your last query comes back from
 the cache. To open a file:
 
 ```sh
-mcu my-query.mpl
+ax my-query.mpl
 ```
 
 To jump straight into a resource, use a subcommand (names may be
-abbreviated to any unambiguous prefix, e.g. `mcu tr` / `mcu da`):
+abbreviated to any unambiguous prefix, e.g. `ax tr` / `ax da`):
 
 ```sh
-mcu dashboard <dashboard-uid>
-mcu trace <trace-id> [--dataset <name>]
+ax dashboard <dashboard-uid>
+ax trace <trace-id> [--dataset <name>]
 ```
 
 The trace dataset defaults to your saved `:trace set dataset=…`; the
@@ -64,7 +64,7 @@ If your MPL declares parameters (`param $host: string;`) you can
 supply values from the command line:
 
 ```sh
-mcu -p host=db-01 -p region=us-east
+ax -p host=db-01 -p region=us-east
 ```
 
 `--help` prints the full list; `--version` prints the build version.
@@ -174,7 +174,7 @@ A few things to know up front:
 ## Where state lives
 
 Datasets, metric lists, dashboard listings, and the last query you
-edited are cached under `$XDG_CACHE_HOME/mcu/` (or the
+edited are cached under `$XDG_CACHE_HOME/ax/` (or the
 platform equivalent). Deleting the directory resets the app; nothing
 on the Axiom server is affected.
 

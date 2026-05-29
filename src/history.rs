@@ -25,10 +25,10 @@
 //! should not vaporise the user's command history. We resolve
 //! via [`etcetera::BaseStrategy::data_dir`] which gives:
 //!
-//! - Linux:   `$XDG_DATA_HOME/mcu/history.json`
-//!   (default `~/.local/share/mcu/history.json`)
-//! - macOS:   `~/Library/Application Support/mcu/history.json`
-//! - Windows: `%APPDATA%\mcu\history.json`
+//! - Linux:   `$XDG_DATA_HOME/ax/history.json`
+//!   (default `~/.local/share/ax/history.json`)
+//! - macOS:   `~/Library/Application Support/ax/history.json`
+//! - Windows: `%APPDATA%\ax\history.json`
 //!
 //! Strict XDG would put this under `$XDG_STATE_HOME` on Linux,
 //! but `etcetera::state_dir` returns `Option<PathBuf>` and only
@@ -115,7 +115,7 @@ impl History {
 
     /// Load from the platform's data dir (see module docs).
     /// Missing or corrupt files yield an empty history — we never
-    /// want a stray byte on disk to wedge mcu's startup.
+    /// want a stray byte on disk to wedge ax's startup.
     pub fn load() -> Self {
         Self::load_from_optional_path(default_path(), DEFAULT_CAP)
     }
@@ -245,7 +245,7 @@ impl History {
 fn default_path() -> Option<PathBuf> {
     use etcetera::BaseStrategy;
     let strategy = etcetera::choose_base_strategy().ok()?;
-    Some(strategy.data_dir().join("mcu").join("history.json"))
+    Some(strategy.data_dir().join("ax").join("history.json"))
 }
 
 #[cfg(test)]

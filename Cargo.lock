@@ -161,6 +161,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "ax"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axiom-rs",
+ "chrono",
+ "clap",
+ "color-eyre",
+ "crossterm",
+ "etcetera",
+ "iso_currency",
+ "miette",
+ "mpl-lang",
+ "mpl-language-server",
+ "nucleo-matcher",
+ "octofhir-ucum",
+ "parking_lot",
+ "pest",
+ "ratatui",
+ "reqwest 0.13.3",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+ "tokio",
+ "toml",
+ "tui-textarea",
+]
+
+[[package]]
 name = "axiom-rs"
 version = "0.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1336,36 +1366,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
-name = "mcu"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axiom-rs",
- "chrono",
- "clap",
- "color-eyre",
- "crossterm",
- "etcetera",
- "iso_currency",
- "miette",
- "mpl-lang",
- "mpl-language-server",
- "nucleo-matcher",
- "octofhir-ucum",
- "parking_lot",
- "pest",
- "ratatui",
- "reqwest 0.13.3",
- "serde",
- "serde_json",
- "tempfile",
- "time",
- "tokio",
- "toml",
- "tui-textarea",
-]
-
-[[package]]
 name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1418,7 +1418,7 @@ dependencies = [
 
 [[package]]
 name = "mpl-lang"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "chrono",
  "miette",
@@ -1436,7 +1436,7 @@ dependencies = [
 
 [[package]]
 name = "mpl-language-server"
-version = "0.5.3"
+version = "0.5.5"
 dependencies = [
  "miette",
  "mpl-lang",

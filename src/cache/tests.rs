@@ -141,7 +141,7 @@ fn query_round_trips_through_disk() {
 }
 
 fn tempdir() -> PathBuf {
-    let base = std::env::temp_dir().join(format!("mcu-test-{}-{}", std::process::id(), unix_now()));
+    let base = std::env::temp_dir().join(format!("ax-test-{}-{}", std::process::id(), unix_now()));
     std::fs::create_dir_all(&base).unwrap();
     base
 }

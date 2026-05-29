@@ -227,7 +227,7 @@ pub(crate) mod tile_ops {
     ///   * the query-object key (`mpl` for MPL, `apl` for APL) —
     ///     matches what [`crate::app::App::sync_buffer_to_focused_tile`]
     ///     will write the user's text into on the next edit;
-    ///   * the `mcuLang` sidecar on `ChartBase.extras` — makes
+    ///   * the `axLang` sidecar on `ChartBase.extras` — makes
     ///     [`crate::dashboard::extract_query`] classify deterministically
     ///     on the next reload without falling back to chart-kind
     ///     heuristics.

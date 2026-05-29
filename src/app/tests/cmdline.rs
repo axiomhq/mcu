@@ -32,7 +32,7 @@ fn bare_q_does_not_quit_anywhere() {
 fn write_and_open_round_trip_through_disk() {
     use std::fs;
     let mut app = test_app();
-    let dir = std::env::temp_dir().join(format!("mcu-test-rt-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("ax-test-rt-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("q.mpl");
 
