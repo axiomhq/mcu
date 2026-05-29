@@ -24,7 +24,8 @@ impl App {
         // already used by the fetch path; a load failure simply
         // collapses the deployment suggestion list to empty.
         let datasets = self.cache.read().dataset_names();
-        let deployments: Vec<String> = crate::config::Config::load()
+        let deployments: Vec<String> = self
+            .resolve_config()
             .map(|cfg| cfg.deployments.keys().cloned().collect())
             .unwrap_or_default();
         let ctx = crate::cmdline_complete::Context {

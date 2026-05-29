@@ -1419,6 +1419,7 @@ dependencies = [
 [[package]]
 name = "mpl-lang"
 version = "0.5.5"
+source = "git+https://github.com/axiomhq/mpl.git?tag=v0.5.5#b556651198fc49a6eb3d8cbebd4eee603a148b63"
 dependencies = [
  "chrono",
  "miette",
@@ -1437,6 +1438,7 @@ dependencies = [
 [[package]]
 name = "mpl-language-server"
 version = "0.5.5"
+source = "git+https://github.com/axiomhq/mpl.git?tag=v0.5.5#b556651198fc49a6eb3d8cbebd4eee603a148b63"
 dependencies = [
  "miette",
  "mpl-lang",

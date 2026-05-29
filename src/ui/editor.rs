@@ -24,11 +24,14 @@ use crate::app::{App, Mode};
 /// Cursor placement assumes char-width == display-width, which holds for
 /// ASCII MPL queries. Backticked Unicode metric names will drift one
 /// column; revisit only if anyone files it.
-pub(super) fn draw_editor(f: &mut Frame, app: &App, area: Rect) {
+pub(super) fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
     let title = editor_title(app);
     let block = pane_block(&title, app.focus == crate::app::Pane::Editor);
     let inner = block.inner(area);
     f.render_widget(block, area);
+    // Stash the editor's inner rect for click-to-position (step 27).
+    // `editor_scroll_top` is stashed below once it's computed.
+    app.mouse_geom.editor_inner = inner;
     if inner.width == 0 || inner.height == 0 {
         return;
     }
@@ -51,6 +54,7 @@ pub(super) fn draw_editor(f: &mut Frame, app: &App, area: Rect) {
     let (cursor_row, cursor_col) = app.editor.cursor();
     let visible_rows = inner.height as usize;
     let top = cursor_row.saturating_sub(visible_rows.saturating_sub(1));
+    app.mouse_geom.editor_scroll_top = top;
 
     // Highlight the cursor row with a faint background - replaces the
     // tui-textarea `cursor_line_style` we no longer use.

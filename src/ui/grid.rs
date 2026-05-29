@@ -78,6 +78,10 @@ pub(super) fn draw_dashboard_grid(f: &mut Frame, app: &mut App, area: Rect) {
     let outer = pane_block(&title, focused);
     let pane_inner = outer.inner(area);
     f.render_widget(outer, area);
+    // Reset the per-frame tile hit-map (step 27). Repopulated in the
+    // render loop below; left empty on the early-return paths so a
+    // click can't match a tile that wasn't drawn.
+    app.mouse_geom.grid_tiles.clear();
     if pane_inner.width < 4 || pane_inner.height < 3 || charts.is_empty() {
         f.render_widget(
             Paragraph::new("(no tiles to render)")
@@ -199,6 +203,7 @@ pub(super) fn draw_dashboard_grid(f: &mut Frame, app: &mut App, area: Rect) {
             height: h,
         };
         let selected = i == app.selected_chart_idx;
+        app.mouse_geom.grid_tiles.push((i, rect));
         draw_grid_tile(f, app, chart, rect, selected && focused);
     }
 

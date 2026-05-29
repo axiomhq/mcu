@@ -306,10 +306,22 @@ pub struct App {
     pub(crate) last_trace_body_height: u16,
     /// Same for the detail pane.
     pub(crate) last_trace_detail_height: u16,
+    /// Per-surface geometry stashed by the renderer each frame so
+    /// [`Self::on_mouse`] can hit-test clicks / scrolls. See
+    /// [`MouseGeometry`].
+    pub(crate) mouse_geom: MouseGeometry,
     runtime: Handle,
     events_tx: mpsc::Sender<AppEvent>,
     events_rx: mpsc::Receiver<AppEvent>,
     client: Option<AxiomClient>,
+    /// Test seam: when `Some`, [`Self::resolve_config`] returns this
+    /// instead of reading `~/.axiom.toml`. Always `None` in production
+    /// (the real config is loaded from disk); the test harness installs
+    /// a synthetic single-deployment config so client-building paths
+    /// don't depend on the developer's machine config. Mirrors the
+    /// in-memory cache / history / settings isolation `test_app` already
+    /// does.
+    config_override: Option<Config>,
     /// `~/.axiom.toml` deployment chosen via `--deployment NAME` on the
     /// command line. Overrides the persistent `active_deployments` field
     /// for this launch. `None` means "use the config file's default".
@@ -465,6 +477,7 @@ impl App {
             trace_query_counter: 0,
             last_trace_body_height: 16,
             last_trace_detail_height: 16,
+            mouse_geom: MouseGeometry::default(),
             trace_view: None,
             pending_trace_fetch: None,
             last_trace_dataset: None,
@@ -473,6 +486,18 @@ impl App {
             events_tx,
             events_rx,
             client: None,
+            config_override: None,
+        }
+    }
+
+    /// Resolve the Axiom config: the injected test override when set,
+    /// otherwise a fresh load of `~/.axiom.toml`. The single chokepoint
+    /// every client-building path goes through so tests never read the
+    /// developer's real config.
+    pub(crate) fn resolve_config(&self) -> anyhow::Result<Config> {
+        match &self.config_override {
+            Some(cfg) => Ok(cfg.clone()),
+            None => Config::load(),
         }
     }
 

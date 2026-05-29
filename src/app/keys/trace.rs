@@ -654,6 +654,73 @@ impl App {
     }
 
     // ============================================================
+    //                          Mouse
+    // ============================================================
+
+    /// Click in the tree body at body-relative `(dx, dy)`. Resolves
+    /// the visible row under the pointer, focuses the tree, and moves
+    /// the cursor there. A click inside the fold-marker band of a
+    /// parent row (the 2-cell `▸`/`▾` glyph at `depth*2`) also toggles
+    /// that subtree's collapse state — that's the click-to-fold
+    /// affordance. The scroll origin comes from the renderer's stash.
+    pub(super) fn mouse_select_trace_row(&mut self, dx: u16, dy: u16) {
+        let Some(view) = self.trace_view.as_ref() else {
+            return;
+        };
+        let visible = view.visible_rows();
+        if visible.is_empty() {
+            self.set_focus(Pane::TraceTree);
+            return;
+        }
+        let vis_idx = self.mouse_geom.trace_tree_scroll + dy as usize;
+        if vis_idx >= visible.len() {
+            // Click on the empty band below the last row: focus only.
+            self.set_focus(Pane::TraceTree);
+            return;
+        }
+        let tree_idx = visible[vis_idx];
+        let row = view.model.tree[tree_idx];
+        let depth = row.depth as usize;
+        let has_children = row.has_children;
+        let span_idx = row.span_idx;
+        // Fold-marker band: `tree_guides` lays each depth level in 2
+        // display cells, and the marker glyph occupies the next 2 — so
+        // the marker sits at `[depth*2, depth*2+2)` from the body edge.
+        let in_fold_band =
+            has_children && (dx as usize) >= depth * 2 && (dx as usize) < depth * 2 + 2;
+
+        self.set_focus(Pane::TraceTree);
+        if let Some(v) = self.trace_view.as_mut() {
+            v.cursor = tree_idx;
+            if in_fold_band {
+                if v.collapsed.contains(&span_idx) {
+                    v.collapsed.remove(&span_idx);
+                } else {
+                    v.collapsed.insert(span_idx);
+                }
+            }
+        }
+    }
+
+    /// Wheel over the tree: the trace model derives `scroll` from the
+    /// cursor (the renderer keeps the cursor visible), so a wheel notch
+    /// steps the cursor rather than scrolling an independent viewport.
+    /// No-op without a loaded trace — `move_trace_cursor` assumes a
+    /// caller guard that the mouse path (unlike the keymap dispatcher)
+    /// doesn't otherwise provide.
+    pub(super) fn mouse_scroll_trace_tree(&mut self, delta: i32) {
+        if self.trace_view.is_none() {
+            return;
+        }
+        self.move_trace_cursor(delta);
+    }
+
+    /// Wheel over the detail pane: line-scroll its independent offset.
+    pub(super) fn mouse_scroll_trace_detail_pane(&mut self, delta: i32) {
+        self.scroll_trace_detail(delta);
+    }
+
+    // ============================================================
     //                          Helpers
     // ============================================================
 

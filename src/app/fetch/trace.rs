@@ -135,7 +135,10 @@ impl App {
         })?;
 
         // Build a fresh client — see module docs for the rationale.
-        let client = build_trace_client(pending.deployment_override.as_deref())
+        let cfg = self
+            .resolve_config()
+            .map_err(|e| format!("trace client: {e}"))?;
+        let client = build_trace_client(&cfg, pending.deployment_override.as_deref())
             .map_err(|e| format!("trace client: {e}"))?;
 
         // APL query — the dataset goes through `serde_json::to_string`
@@ -303,11 +306,11 @@ impl App {
 }
 
 /// Build a fresh AxiomClient against the deployment named by
-/// `deployment` (or the user's active default when `None`).
-/// Loads `~/.axiom.toml` synchronously — the call is rare and
-/// the file is tiny.
-fn build_trace_client(deployment: Option<&str>) -> anyhow::Result<AxiomClient> {
-    let cfg = Config::load()?;
+/// `deployment` (or the user's active default when `None`),
+/// resolving against the supplied `cfg`. The caller passes
+/// [`App::resolve_config`]'s result so tests can inject a synthetic
+/// config instead of reading `~/.axiom.toml`.
+fn build_trace_client(cfg: &Config, deployment: Option<&str>) -> anyhow::Result<AxiomClient> {
     let (_name, dep) = cfg.select(deployment)?;
     AxiomClient::new(dep)
 }

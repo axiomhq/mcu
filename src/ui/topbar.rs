@@ -102,8 +102,20 @@ pub(super) fn mpl_label_for_path(p: &std::path::Path) -> String {
         .unwrap_or_else(|| p.to_string_lossy().into_owned())
 }
 
-pub(super) fn draw_topbar(f: &mut Frame, app: &App, area: Rect) {
-    let left = Line::from(tab_spans(app.buffer_mode));
+pub(super) fn draw_topbar(f: &mut Frame, app: &mut App, area: Rect) {
+    let spans = tab_spans(app.buffer_mode);
+    // Stash the tab geometry so `App::on_mouse` can route a topbar
+    // click. Labels are ASCII plus the 1-wide `│` separator, so a
+    // char count equals the display width here. The separator strip
+    // counts toward the DASHBOARD tab — a harmless 3-cell overlap.
+    let query_w = spans[0].content.chars().count() as u16;
+    let sep_w = spans[1].content.chars().count() as u16;
+    let dash_w = spans[2].content.chars().count() as u16;
+    app.mouse_geom.topbar = area;
+    app.mouse_geom.topbar_query_end_x = area.x.saturating_add(query_w);
+    app.mouse_geom.topbar_dash_end_x = area.x.saturating_add(query_w + sep_w + dash_w);
+
+    let left = Line::from(spans);
     f.render_widget(Paragraph::new(left), area);
 
     let right_text = context_label(app);

@@ -333,6 +333,16 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let params_focused = app.focus == crate::app::Pane::Params;
     params::draw_params(f, app, params_area, params_focused);
 
+    // Stash Solo/Grid pane rects for mouse hit-testing (step 27).
+    // `dashboard` is only meaningful when the grid pane occupies
+    // `top[0]`; otherwise it's zeroed so a click can't match it.
+    let grid_active = app.view_mode == crate::app::ViewMode::Grid && app.loaded_dashboard.is_some();
+    app.mouse_geom.graph = top[0];
+    app.mouse_geom.legend = top[1];
+    app.mouse_geom.editor = editor_area;
+    app.mouse_geom.params = params_area;
+    app.mouse_geom.dashboard = if grid_active { top[0] } else { Rect::default() };
+
     status::draw_status(f, app, root[2]);
 
     if app.completions.visible {

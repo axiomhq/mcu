@@ -21,7 +21,24 @@ pub(super) fn test_app() -> App {
     let handle = rt.handle().clone();
     // Leak the runtime so the handle remains valid for the duration of the test.
     Box::leak(Box::new(rt));
-    App::with_cache(handle, Cache::in_memory(String::new()))
+    let mut app = App::with_cache(handle, Cache::in_memory(String::new()));
+    // Inject a synthetic single-deployment config so client-building
+    // paths (`ensure_client`, trace fetch, share URL) resolve cleanly
+    // instead of reading the developer's real `~/.axiom.toml` — which
+    // may have multiple deployments and no `active_deployments`, making
+    // `select(None)` fail. Mirrors the in-memory cache / history /
+    // settings isolation above. A single deployment means `select(None)`
+    // returns it without needing `active_deployments`.
+    app.config_override = Some(
+        crate::config::Config::parse(
+            "[deployments.test]\n\
+             url = \"https://example.test\"\n\
+             token = \"xaat-test-token\"\n\
+             org_id = \"test-org\"\n",
+        )
+        .expect("synthetic test config parses"),
+    );
+    app
 }
 
 pub(super) fn type_text(app: &mut App, s: &str) {
@@ -214,6 +231,7 @@ mod editor;
 mod focus;
 mod legend;
 mod misc;
+mod mouse;
 mod params;
 mod query;
 mod tile;

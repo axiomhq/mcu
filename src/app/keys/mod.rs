@@ -14,6 +14,7 @@ use super::*;
 mod cmdline;
 mod dashboard;
 mod editor;
+mod mouse;
 mod overlays;
 mod panes;
 mod trace;

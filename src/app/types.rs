@@ -9,6 +9,8 @@
 
 use std::collections::{BTreeMap, HashSet};
 
+use ratatui::layout::Rect;
+
 use crate::axiom::{
     AplQueryResult, DashboardSummary, DashboardSummaryExt, DatasetSummary, MetricInfo,
     MetricsQueryResponse,
@@ -438,6 +440,47 @@ pub enum Pane {
 /// Solo is the default for fresh sessions and `.mpl` buffers;
 /// loading a multi-chart dashboard auto-switches to Grid
 /// (overridable with `:solo`).
+/// Per-surface geometry stashed by the renderer each frame and
+/// consumed by [`super::App::on_mouse`] on the next event. Mirrors
+/// the existing "stash geometry during draw, consume next frame"
+/// convention already used for `last_trace_body_height` etc. Every
+/// rect is one frame behind; at the 100ms event poll the staleness is
+/// imperceptible, and hit-tests are additionally gated by the current
+/// `view_mode` so a rect left over from another view can't misfire.
+///
+/// Rects default to the zero rect (`0×0` at origin), which never
+/// matches a real click — so before the first `draw` the mouse is
+/// inert rather than wrong.
+#[derive(Debug, Clone, Default)]
+pub struct MouseGeometry {
+    /// Topbar row (`root[0]`) and the end-x columns of the `QUERY`
+    /// and `DASHBOARD` tab labels, used to discriminate tab clicks.
+    pub topbar: Rect,
+    pub topbar_query_end_x: u16,
+    pub topbar_dash_end_x: u16,
+    /// Editor pane outer rect (border-inclusive, for focus clicks)
+    /// plus its inner rect and first-visible-row scroll offset for
+    /// translating a click cell into a `(row, col)` buffer position.
+    pub editor: Rect,
+    pub editor_inner: Rect,
+    pub editor_scroll_top: usize,
+    /// Solo-view secondary panes (border-inclusive outer rects).
+    pub legend: Rect,
+    pub params: Rect,
+    /// Solo graph / table pane.
+    pub graph: Rect,
+    /// Grid view: dashboard pane outer rect and the per-tile
+    /// `(chart_idx, rect)` list rebuilt every frame.
+    pub dashboard: Rect,
+    pub grid_tiles: Vec<(usize, Rect)>,
+    /// Trace view: tree body rect + the scroll origin used that frame
+    /// (so a click row maps to `visible[scroll + dy]`), and the detail
+    /// pane rect.
+    pub trace_tree_body: Rect,
+    pub trace_tree_scroll: usize,
+    pub trace_detail: Rect,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ViewMode {
     #[default]

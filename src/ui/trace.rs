@@ -126,6 +126,10 @@ pub fn draw_trace(f: &mut Frame, app: &mut App, area: Rect) {
     app.last_trace_detail_height = detail_rect_opt
         .map(|r| r.height.saturating_sub(2))
         .unwrap_or(0);
+    // Stash the detail rect for mouse focus / scroll routing (step
+    // 27). The tree body rect + scroll origin are stashed inside
+    // `draw_tree`, which has the post-prompt body geometry.
+    app.mouse_geom.trace_detail = detail_rect_opt.unwrap_or_default();
 }
 
 // ============================================================
@@ -221,6 +225,9 @@ fn draw_tree(f: &mut Frame, app: &mut App, area: Rect) {
         width: area.width,
         height: area.height.saturating_sub(prompt_h),
     };
+    // Stash the tree body rect for mouse hit-testing (step 27). The
+    // scroll origin is stashed below once it's been re-clamped.
+    app.mouse_geom.trace_tree_body = body_area;
 
     // Compute visible rows + cursor position within them, then
     // reclamp scroll. `cursor` lives in `model.tree` index space
@@ -286,6 +293,9 @@ fn draw_tree(f: &mut Frame, app: &mut App, area: Rect) {
         v.cursor = cursor_tree;
         v.scroll = scroll as u16;
     }
+    // Stash the re-clamped scroll origin so a click row maps to
+    // `visible[scroll + dy]` next frame (step 27).
+    app.mouse_geom.trace_tree_scroll = scroll;
 
     let view = app.trace_view.as_ref().expect("checked above");
     let model = &view.model;

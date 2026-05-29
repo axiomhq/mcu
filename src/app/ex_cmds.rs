@@ -235,7 +235,7 @@ impl App {
         // `metricsDataset` selects the right tab.
         let dataset = mpl::extract_dataset_metric(&mpl).map(|p| p.0).ok();
         let override_name = self.deployment_override.clone();
-        let (deployment_url, org_id) = match Config::load().and_then(|cfg| {
+        let (deployment_url, org_id) = match self.resolve_config().and_then(|cfg| {
             cfg.select(override_name.as_deref())
                 .map(|(_, dep)| (dep.url.clone(), dep.org_id.clone()))
         }) {
