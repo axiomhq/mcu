@@ -553,7 +553,7 @@ fn persist_query_round_trips_buffer_lang_through_cache() {
     let cache_path = dir.path().join("discovery.json");
     // Build an app pointed at the temp cache, flip to APL, type
     // an APL query, persist.
-    let handle = tokio::runtime::Runtime::new().unwrap().handle().clone();
+    let handle = TEST_RT.handle().clone();
     let cache = crate::cache::Cache::with_path(String::new(), cache_path.clone());
     let mut app = crate::app::App::with_cache(handle.clone(), cache);
     app.cmd_lang(Lang::Apl);

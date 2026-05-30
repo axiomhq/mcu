@@ -13,14 +13,23 @@ pub(super) fn ctrl(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::CONTROL)
 }
 
-pub(super) fn test_app() -> App {
-    let rt = tokio::runtime::Builder::new_current_thread()
+/// One process-wide runtime shared by every `test_app()`. Building
+/// (and previously `Box::leak`ing) a fresh runtime per call leaked one
+/// kqueue/event fd per test; with ~900 tests in parallel that exhausts
+/// the default `ulimit -n` (256 on macOS), making ~1/3 of the suite
+/// fail with `Too many open files`. The tests only need a live
+/// `Handle` (background tasks are never driven to completion here), so
+/// a single shared runtime keeps the handle valid for the whole suite
+/// behind one fd.
+static TEST_RT: std::sync::LazyLock<tokio::runtime::Runtime> = std::sync::LazyLock::new(|| {
+    tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .unwrap();
-    let handle = rt.handle().clone();
-    // Leak the runtime so the handle remains valid for the duration of the test.
-    Box::leak(Box::new(rt));
+        .expect("build shared test runtime")
+});
+
+pub(super) fn test_app() -> App {
+    let handle = TEST_RT.handle().clone();
     let mut app = App::with_cache(handle, Cache::in_memory(String::new()));
     // Inject a synthetic single-deployment config so client-building
     // paths (`ensure_client`, trace fetch, share URL) resolve cleanly
